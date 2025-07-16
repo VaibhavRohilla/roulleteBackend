@@ -29,8 +29,13 @@ export class GameStateManager {
   private currentSpinIndex: number | null = null;
   private roundDuration: number = CONFIG.ROUND_DURATION;
 
+  // Frontend activity tracking
+  private lastFrontendActivity: Date | null = null;
+  private activityCheckTimer: NodeJS.Timeout | null = null;
+
   private constructor() {
     console.log('🎮 GameStateManager initialized with API-driven state tracking');
+    this.startActivityMonitoring();
   }
 
   public static getInstance(): GameStateManager {
@@ -109,8 +114,9 @@ export class GameStateManager {
     this.isSpinning = false;
     this.currentRoundStartTime = null;
     this.currentSpinIndex = null;
+    this.lastFrontendActivity = null;
     spinQueue.length = 0;
-    console.log('🔄 Game state reset - Queue cleared, game resumed');
+    console.log('🔄 Game state reset - Queue cleared, frontend activity reset, game resumed');
     this.resumeCallbacks.forEach(callback => callback());
   }
 
@@ -167,12 +173,8 @@ export class GameStateManager {
       this.isSpinning = false;
       this.currentSpinIndex = null;
       
-      // Start next round after waiting period (if game is still running)
-      setTimeout(() => {
-        if (this.isRunning()) {
-          this.startNewRound();
-        }
-      }, CONFIG.WAITING_PERIOD);
+      // Stay idle - new rounds will only start when spins are queued via Telegram
+      console.log('⏸️ Game idle - waiting for spins to be queued via Telegram bot');
       
       return;
     }
@@ -211,13 +213,7 @@ export class GameStateManager {
     this.isSpinning = false;
     this.currentSpinIndex = null;
     console.log('🏁 Spin completed, entering idle state');
-    
-    // Auto-start next round after waiting period (if game is still running)
-    setTimeout(() => {
-      if (this.isRunning()) {
-        this.startNewRound();
-      }
-    }, CONFIG.WAITING_PERIOD);
+    console.log('⏸️ Game will remain idle until new spins are queued');
   }
 
   /**
@@ -368,5 +364,82 @@ export class GameStateManager {
 ${queueInfo}
 ${roundInfo}
 🕒 Last Update: ${new Date().toLocaleTimeString()}`;
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 🔍 FRONTEND ACTIVITY TRACKING
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /**
+   * Record frontend activity (called on API requests)
+   */
+  public recordFrontendActivity(): void {
+    this.lastFrontendActivity = new Date();
+    console.log(`📡 Frontend activity recorded at ${this.lastFrontendActivity.toLocaleTimeString()}`);
+  }
+
+  /**
+   * Check if frontend has been inactive for too long
+   */
+  public isFrontendInactive(): boolean {
+    if (!this.lastFrontendActivity) {
+      return false; // No activity recorded yet, don't consider inactive
+    }
+
+    const timeSinceLastActivity = Date.now() - this.lastFrontendActivity.getTime();
+    return timeSinceLastActivity > CONFIG.FRONTEND_ACTIVITY_TIMEOUT;
+  }
+
+  /**
+   * Get time since last frontend activity in milliseconds
+   */
+  public getTimeSinceLastActivity(): number {
+    if (!this.lastFrontendActivity) {
+      return 0;
+    }
+    return Date.now() - this.lastFrontendActivity.getTime();
+  }
+
+  /**
+   * Start monitoring frontend activity and auto-end games when inactive
+   */
+  private startActivityMonitoring(): void {
+    console.log('🔍 Starting frontend activity monitoring');
+    
+    const checkActivity = () => {
+      if (this.isFrontendInactive() && (this.roundActive || this.isSpinning)) {
+        const timeSinceActivity = this.getTimeSinceLastActivity();
+        console.log(`⏱️ Frontend inactive for ${timeSinceActivity}ms, auto-ending game`);
+        
+        // Force end the current round/spin and enter idle state
+        if (this.isSpinning) {
+          this.isSpinning = false;
+          this.currentSpinIndex = null;
+          console.log('🏁 Auto-ended spin due to frontend inactivity');
+        }
+        
+        if (this.roundActive) {
+          this.roundActive = false;
+          this.currentRoundStartTime = null;
+          console.log('⏰ Auto-ended round due to frontend inactivity');
+        }
+        
+        console.log('💤 Game entered idle state due to no frontend activity');
+      }
+    };
+
+    // Check activity every configured interval
+    this.activityCheckTimer = setInterval(checkActivity, CONFIG.ACTIVITY_CHECK_INTERVAL);
+  }
+
+  /**
+   * Stop activity monitoring (cleanup)
+   */
+  public stopActivityMonitoring(): void {
+    if (this.activityCheckTimer) {
+      clearInterval(this.activityCheckTimer);
+      this.activityCheckTimer = null;
+      console.log('🔍 Stopped frontend activity monitoring');
+    }
   }
 } 

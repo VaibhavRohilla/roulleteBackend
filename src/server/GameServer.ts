@@ -71,6 +71,9 @@ export class GameServer {
      * Returns current game state for polling-based game flow
      */
     this.app.get('/api/game-state', (req, res) => {
+      // Record frontend activity
+      this.gameStateManager.recordFrontendActivity();
+      
       const gameState = this.gameStateManager.getGameStateResponse();
       
       console.log(`📡 API: Game state requested - Round: ${gameState.roundActive}, Spinning: ${gameState.isSpinning}`);
@@ -83,6 +86,9 @@ export class GameServer {
      * Can be used by frontend after countdown completes to get spin index
      */
     this.app.get('/api/spin-result', (req, res) => {
+      // Record frontend activity
+      this.gameStateManager.recordFrontendActivity();
+      
       const spinResult = this.gameStateManager.getSpinResult();
       
       if (spinResult) {
@@ -99,6 +105,9 @@ export class GameServer {
      * Can be used by frontend to indicate spin animation is complete
      */
     this.app.post('/api/spin-end', (req, res) => {
+      // Record frontend activity
+      this.gameStateManager.recordFrontendActivity();
+      
       const gameState = this.gameStateManager.getGameStateResponse();
       
       if (gameState.isSpinning) {
@@ -177,9 +186,9 @@ export class GameServer {
     console.log('🔄 Starting API-driven game cycle (replacing WebSocket loop)');
     
     // Start the automatic game cycle
-    this.gameStateManager.startAutoCycle();
+    // this.gameStateManager.startAutoCycle();
     
-    console.log('✅ API-driven game cycle started - Frontend can now poll /api/game-state');
+    console.log('🎯 Game will start rounds only when spins are queued via Telegram bot');
   }
 
   /**

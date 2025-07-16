@@ -47,6 +47,12 @@ export class TelegramBotService {
       spinQueue.push(index);
       const gameState = this.gameStateManager.getGameStateResponse();
       
+      // If game is idle (no active round, no spinning), start a new round
+      if (!gameState.roundActive && !gameState.isSpinning && this.gameStateManager.isRunning()) {
+        console.log('🚀 Game was idle, starting new round due to queued spin');
+        this.gameStateManager.startNewRound();
+      }
+      
       this.bot.sendMessage(msg.chat.id, `✅ **Spin Queued Successfully**\n\n🎯 Number: ${index}\n👤 Added by: @${username}\n📋 Queue Position: ${spinQueue.length}\n📊 Total in Queue: ${spinQueue.length}\n🎮 Game State: ${gameState.roundActive ? '🎯 Round Active' : gameState.isSpinning ? '🎰 Spinning' : '💤 Idle'}\n\n⏰ ${new Date().toLocaleTimeString()}`);
       await this.logAction(userId, username, 'add_spin', `Added spin: ${index}`, oldQueue, [...spinQueue], true);
     });
