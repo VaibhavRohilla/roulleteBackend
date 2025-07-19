@@ -2,6 +2,7 @@
 import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { CONFIG } from '../config/config';
 import { Logger } from '../utils/Logger';
+import { TimeUtils } from '../utils/TimeUtils';
 
 export interface AuditLog {
   id?: string;
@@ -64,7 +65,7 @@ export class SupabaseService {
           old_value: auditData.old_value,
           new_value: auditData.new_value,
           success: auditData.success,
-          timestamp: new Date().toISOString()
+          timestamp: TimeUtils.getIndianISOForDB()
         }]);
 
       if (error) {

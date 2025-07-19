@@ -16,6 +16,10 @@ export const CONFIG = {
   FRONTEND_ACTIVITY_TIMEOUT: parseInt(process.env.FRONTEND_ACTIVITY_TIMEOUT || '60000'), // 60 seconds
   ACTIVITY_CHECK_INTERVAL: parseInt(process.env.ACTIVITY_CHECK_INTERVAL || '10000'), // Check every 10 seconds
   
+  // Timezone Configuration
+  TIMEZONE: 'Asia/Kolkata',      // Indian Standard Time (IST)
+  LOCALE: 'en-IN',               // Indian locale for formatting
+  
   // Supabase Configuration
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,

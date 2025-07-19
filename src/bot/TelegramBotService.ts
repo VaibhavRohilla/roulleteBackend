@@ -3,6 +3,7 @@ import { CONFIG } from '../config/config';
 import { Logger } from '../utils/Logger';
 import { SupabaseService } from '../services/SupabaseService';
 import { GameStateManager, GameState, GameStateResponse } from '../services/GameStateManager';
+import { TimeUtils } from '../utils/TimeUtils';
 
 export const spinQueue: number[] = [];
 
@@ -53,7 +54,7 @@ export class TelegramBotService {
         this.gameStateManager.startNewRound();
       }
       
-      this.bot.sendMessage(msg.chat.id, `✅ **Spin Queued Successfully**\n\n🎯 Number: ${index}\n👤 Added by: @${username}\n📋 Queue Position: ${spinQueue.length}\n📊 Total in Queue: ${spinQueue.length}\n🎮 Game State: ${gameState.roundActive ? '🎯 Round Active' : gameState.isSpinning ? '🎰 Spinning' : '💤 Idle'}\n\n⏰ ${new Date().toLocaleTimeString()}`);
+      this.bot.sendMessage(msg.chat.id, `✅ **Spin Queued Successfully**\n\n🎯 Number: ${index}\n👤 Added by: @${username}\n📋 Queue Position: ${spinQueue.length}\n📊 Total in Queue: ${spinQueue.length}\n🎮 Game State: ${gameState.roundActive ? '🎯 Round Active' : gameState.isSpinning ? '🎰 Spinning' : '💤 Idle'}\n\n⏰ ${TimeUtils.getIndianTimeString()}`);
       await this.logAction(userId, username, 'add_spin', `Added spin: ${index}`, oldQueue, [...spinQueue], true);
     });
 
@@ -75,7 +76,7 @@ export class TelegramBotService {
         `📋 Queue Length: ${spinQueue.length} spins\n` +
         `📝 Queued Numbers: [${spinQueue.join(', ') || 'empty'}]\n` +
         `⏰ Round Duration: ${gameState.roundDuration || 0}ms\n` +
-        `🕒 Last Update: ${new Date().toLocaleTimeString()}\n` +
+        `🕒 Last Update: ${TimeUtils.getIndianTimeString()}\n` +
         `👤 Requested by: @${username}`;
         
       this.bot.sendMessage(msg.chat.id, statusMessage);
@@ -115,7 +116,7 @@ export class TelegramBotService {
 
       const deletedCount = initialLength - spinQueue.length;
       if (deletedCount > 0) {
-        this.bot.sendMessage(msg.chat.id, `✅ **Value Deleted Successfully**\n\n🎯 Number: ${valueToDelete}\n🗑️ Instances Removed: ${deletedCount}\n📋 Queue Length: ${initialLength} → ${spinQueue.length}\n📝 Remaining Queue: [${spinQueue.join(', ') || 'empty'}]\n👤 Deleted by: @${username}\n⏰ ${new Date().toLocaleTimeString()}`);
+        this.bot.sendMessage(msg.chat.id, `✅ **Value Deleted Successfully**\n\n🎯 Number: ${valueToDelete}\n🗑️ Instances Removed: ${deletedCount}\n📋 Queue Length: ${initialLength} → ${spinQueue.length}\n📝 Remaining Queue: [${spinQueue.join(', ') || 'empty'}]\n👤 Deleted by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
         await this.logAction(userId, username, 'delete_value', `Deleted value: ${valueToDelete} (${deletedCount} instances)`, oldQueue, [...spinQueue], true);
       } else {
         this.bot.sendMessage(msg.chat.id, `❌ **Value Not Found**\n\n🎯 Number: ${valueToDelete}\n📋 Current Queue: [${spinQueue.join(', ') || 'empty'}]\n📊 Queue Length: ${spinQueue.length}\n👤 Attempted by: @${username}\n\nThe number ${valueToDelete} was not found in the queue.`);
@@ -137,7 +138,7 @@ export class TelegramBotService {
       const success = this.gameStateManager.resume();
       if (success) {
         const gameState = this.gameStateManager.getGameStateResponse();
-        this.bot.sendMessage(msg.chat.id, `✅ **Game Resumed Successfully**\n\n▶️ Status: RUNNING\n🎮 Previous State: ${oldState.toUpperCase()}\n📋 Queue Length: ${spinQueue.length}\n🎯 Round Active: ${gameState.roundActive ? 'YES' : 'NO'}\n👤 Resumed by: @${username}\n⏰ ${new Date().toLocaleTimeString()}`);
+        this.bot.sendMessage(msg.chat.id, `✅ **Game Resumed Successfully**\n\n▶️ Status: RUNNING\n🎮 Previous State: ${oldState.toUpperCase()}\n📋 Queue Length: ${spinQueue.length}\n🎯 Round Active: ${gameState.roundActive ? 'YES' : 'NO'}\n👤 Resumed by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
         await this.logAction(userId, username, 'resume_game', 'Game resumed', oldState, GameState.RUNNING, true);
       } else {
         this.bot.sendMessage(msg.chat.id, `❌ **Resume Failed**\n\n🎮 Current State: ${oldState.toUpperCase()}\n📝 Reason: Game is already running\n👤 Attempted by: @${username}\n\nThe game is already in running state.`);
@@ -159,7 +160,7 @@ export class TelegramBotService {
       const success = this.gameStateManager.pause();
       if (success) {
         const gameState = this.gameStateManager.getGameStateResponse();
-        this.bot.sendMessage(msg.chat.id, `✅ **Game Paused Successfully**\n\n⏸️ Status: PAUSED\n🎮 Previous State: ${oldState.toUpperCase()}\n📋 Queue Length: ${spinQueue.length}\n🎯 Round Active: ${gameState.roundActive ? 'YES' : 'NO'}\n👤 Paused by: @${username}\n⏰ ${new Date().toLocaleTimeString()}\n\nUse /resume to continue the game.`);
+        this.bot.sendMessage(msg.chat.id, `✅ **Game Paused Successfully**\n\n⏸️ Status: PAUSED\n🎮 Previous State: ${oldState.toUpperCase()}\n📋 Queue Length: ${spinQueue.length}\n🎯 Round Active: ${gameState.roundActive ? 'YES' : 'NO'}\n👤 Paused by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}\n\nUse /resume to continue the game.`);
         await this.logAction(userId, username, 'pause_game', 'Game paused', oldState, GameState.PAUSED, true);
       } else {
         this.bot.sendMessage(msg.chat.id, `❌ **Pause Failed**\n\n🎮 Current State: ${oldState.toUpperCase()}\n📝 Reason: Game is already paused\n👤 Attempted by: @${username}\n\nThe game is already in paused state.`);
@@ -183,7 +184,7 @@ export class TelegramBotService {
       this.gameStateManager.reset();
       const gameState = this.gameStateManager.getGameStateResponse();
       
-      this.bot.sendMessage(msg.chat.id, `✅ **Game Reset Successfully**\n\n🔄 Action: FULL RESET\n🎮 Game State: RUNNING\n📋 Queue: CLEARED (was ${oldQueue.length} items)\n🎯 Round Active: ${gameState.roundActive ? 'YES' : 'NO'}\n📝 Previous Queue: [${oldQueue.join(', ') || 'empty'}]\n👤 Reset by: @${username}\n⏰ ${new Date().toLocaleTimeString()}\n\nGame is now ready for new rounds!`);
+      this.bot.sendMessage(msg.chat.id, `✅ **Game Reset Successfully**\n\n🔄 Action: FULL RESET\n🎮 Game State: RUNNING\n📋 Queue: CLEARED (was ${oldQueue.length} items)\n🎯 Round Active: ${gameState.roundActive ? 'YES' : 'NO'}\n📝 Previous Queue: [${oldQueue.join(', ') || 'empty'}]\n👤 Reset by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}\n\nGame is now ready for new rounds!`);
       await this.logAction(userId, username, 'reset_game', 'Full game reset', { queue: oldQueue, state: oldState }, { queue: [], state: GameState.RUNNING }, true);
     });
 
@@ -224,7 +225,7 @@ export class TelegramBotService {
 • Real-time state synchronization
 
 👤 **Help requested by:** @${username}
-⏰ **Generated at:** ${new Date().toLocaleTimeString()}`;
+⏰ **Generated at:** ${TimeUtils.getIndianTimeString()}`;
 
       this.bot.sendMessage(msg.chat.id, helpMessage);
       await this.logAction(userId, username, 'help_requested', 'Viewed help message', null, null, true);
@@ -250,7 +251,7 @@ export class TelegramBotService {
     spinQueue.length = 0;
     
     if (queueLength > 0) {
-      this.bot.sendMessage(msg.chat.id, `✅ **Queue Cleared Successfully**\n\n🗑️ Action: QUEUE CLEARED\n📋 Items Removed: ${queueLength}\n📝 Cleared Numbers: [${oldQueue.join(', ')}]\n📊 New Queue Length: 0\n👤 Cleared by: @${username}\n⏰ ${new Date().toLocaleTimeString()}`);
+      this.bot.sendMessage(msg.chat.id, `✅ **Queue Cleared Successfully**\n\n🗑️ Action: QUEUE CLEARED\n📋 Items Removed: ${queueLength}\n📝 Cleared Numbers: [${oldQueue.join(', ')}]\n📊 New Queue Length: 0\n👤 Cleared by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
     } else {
       this.bot.sendMessage(msg.chat.id, `ℹ️ **Queue Already Empty**\n\n📋 Current Queue Length: 0\n👤 Attempted by: @${username}\n\nThe queue was already empty.`);
     }

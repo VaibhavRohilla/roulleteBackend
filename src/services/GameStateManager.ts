@@ -1,6 +1,7 @@
 import { Logger } from '../utils/Logger';
 import { spinQueue } from '../bot/TelegramBotService';
 import { CONFIG } from '../config/config';
+import { TimeUtils } from '../utils/TimeUtils';
 
 export enum GameState {
   RUNNING = 'running',
@@ -234,7 +235,7 @@ export class GameStateManager {
       roundActive: this.roundActive,
       isSpinning: this.isSpinning,
       spinIndex: this.currentSpinIndex || undefined,
-      roundStartTime: this.currentRoundStartTime?.toISOString(),
+      roundStartTime: this.currentRoundStartTime ? TimeUtils.toIndianISO(this.currentRoundStartTime) : undefined,
       roundDuration: this.roundDuration
     };
   }
@@ -363,7 +364,7 @@ export class GameStateManager {
     return `${stateEmoji[this.currentState]} Game Status: ${this.currentState.toUpperCase()}
 ${queueInfo}
 ${roundInfo}
-🕒 Last Update: ${new Date().toLocaleTimeString()}`;
+🕒 Last Update: ${TimeUtils.getIndianTimeString()}`;
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -375,7 +376,7 @@ ${roundInfo}
    */
   public recordFrontendActivity(): void {
     this.lastFrontendActivity = new Date();
-    console.log(`📡 Frontend activity recorded at ${this.lastFrontendActivity.toLocaleTimeString()}`);
+    console.log(`📡 Frontend activity recorded at ${TimeUtils.formatDateForIndian(this.lastFrontendActivity)}`);
   }
 
   /**

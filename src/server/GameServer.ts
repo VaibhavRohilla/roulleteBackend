@@ -6,6 +6,7 @@ import { CONFIG } from '../config/config';
 import { spinQueue } from '../bot/TelegramBotService';
 import { Logger } from '../utils/Logger';
 import { GameStateManager, GameStateResponse } from '../services/GameStateManager';
+import { TimeUtils } from '../utils/TimeUtils';
 
 export class GameServer {
   private app = express();
@@ -42,7 +43,7 @@ export class GameServer {
       const gameState = this.gameStateManager.getGameStateResponse();
       res.json({ 
         status: 'ok', 
-        timestamp: new Date().toISOString(),
+        timestamp: TimeUtils.getIndianISOForDB(),
         gameState: this.gameStateManager.getState(),
         queuedSpins: spinQueue.length,
         ...gameState
