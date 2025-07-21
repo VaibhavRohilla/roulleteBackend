@@ -3,7 +3,7 @@ import { spinQueue } from '../bot/TelegramBotService';
 import { CONFIG } from '../config/config';
 import { TimeUtils } from '../utils/TimeUtils';
 import { SupabaseService } from './SupabaseService';
-import { getRouletteColor, getRouletteParity, isValidRouletteNumber } from '../utils/RouletteUtils';
+import { isValidRouletteNumber } from '../utils/RouletteUtils';
 
 export enum GameState {
   RUNNING = 'running',
@@ -17,6 +17,12 @@ export interface GameStateResponse {
   spinIndex?: number;
   roundStartTime?: string; // ISO date string
   roundDuration?: number; // in milliseconds
+  lastSpinResult?: {
+    spin_number: number;
+    color: string;
+    parity: string;
+    timestamp: string;
+  };
 }
 
 export class GameStateManager {
@@ -186,9 +192,9 @@ export class GameStateManager {
 
     // Use first queued spin
     this.currentSpinIndex = spins[0];
-    console.log(`🌀 Using queued spin: ${this.currentSpinIndex}`);
+    console.log(`🌀 Using queued spin: ${this.currentSpinIndex} (already stored in DB by Telegram)`);
     
-    // Log spin processing to audit trail
+    // Log spin processing to audit trail  
     await this.logSpinProcessing(spins[0], spins, spins.length - 1);
     
     // Put remaining spins back in queue
@@ -199,7 +205,6 @@ export class GameStateManager {
 
     this.isSpinning = true;
     this.roundActive = false; // Round ends when spin starts
-    
     console.log(`🎰 Round ended, spin started with index: ${this.currentSpinIndex}`);
     
     // Auto-end spin after frontend animation duration
@@ -218,68 +223,13 @@ export class GameStateManager {
       return;
     }
 
-    // Store the spin result before ending the spin
-    if (this.currentSpinIndex !== null) {
-      try {
-        await this.storeSpinResult(this.currentSpinIndex);
-        console.log('✅ Spin result stored successfully before ending spin');
-      } catch (error) {
-        Logger.error(`❌ Failed to store spin result before ending spin: ${error}`);
-        // Continue ending the spin even if storage fails to avoid getting stuck
-      }
-    }
-
     this.isSpinning = false;
     this.currentSpinIndex = null;
     console.log('🏁 Spin completed, entering idle state');
     console.log('⏸️ Game will remain idle until new spins are queued');
   }
 
-  /**
-   * Store spin result to database with retry logic
-   */
-  private async storeSpinResult(spinNumber: number): Promise<void> {
-    // Check if Supabase is configured
-    if (!this.supabaseService.isConfigured()) {
-      console.warn(`⚠️ Supabase not configured, skipping storage for spin: ${spinNumber}`);
-      return;
-    }
 
-    const maxRetries = 3;
-    let attempts = 0;
-
-    while (attempts < maxRetries) {
-      try {
-        // Calculate roulette properties for the winning number
-        const color = getRouletteColor(spinNumber);
-        const parity = getRouletteParity(spinNumber);
-        
-        console.log(`💾 Storing spin result (attempt ${attempts + 1}/${maxRetries}): ${spinNumber} ${color} ${parity}`);
-        
-        const success = await this.supabaseService.storeSpinResult(spinNumber, color, parity);
-        
-        if (success) {
-          console.log(`✅ Spin result stored successfully: ${spinNumber} ${color} ${parity}`);
-          return; // Success, exit retry loop
-        } else {
-          throw new Error(`Supabase returned false for spin ${spinNumber}`);
-        }
-      } catch (error) {
-        attempts++;
-        Logger.error(`❌ Error storing spin result (attempt ${attempts}/${maxRetries}): ${error}`);
-        
-        if (attempts >= maxRetries) {
-          Logger.error(`❌ Failed to store spin result after ${maxRetries} attempts: ${spinNumber}`);
-          throw error; // Re-throw after max attempts
-        } else {
-          // Wait before retrying (exponential backoff)
-          const delay = Math.pow(2, attempts) * 1000; // 2s, 4s, 8s
-          console.log(`⏳ Retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-  }
 
 
 
@@ -320,7 +270,20 @@ export class GameStateManager {
   }
 
   /**
-   * Get current game state for API response
+   * Get the last spin result from database
+   */
+  public async getLastSpinResult(): Promise<any> {
+    try {
+      const results = await this.supabaseService.getLastSpinResults(1, false);
+      return results.length > 0 ? results[0] : null;
+    } catch (error) {
+      Logger.error(`❌ Error retrieving last spin result: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get current game state for API response (synchronous version)
    */
   public getGameStateResponse(): GameStateResponse {
     // Check if round has expired
@@ -340,6 +303,28 @@ export class GameStateManager {
       roundStartTime: this.currentRoundStartTime ? TimeUtils.toIndianISO(this.currentRoundStartTime) : undefined,
       roundDuration: this.roundDuration
     };
+  }
+
+  /**
+   * Get current game state with last spin result for API response
+   */
+  public async getGameStateWithLastSpin(): Promise<GameStateResponse> {
+    const gameState = this.getGameStateResponse();
+    
+    // If no active game, include last spin result
+    if (!gameState.roundActive && !gameState.isSpinning) {
+      const lastSpin = await this.getLastSpinResult();
+      if (lastSpin) {
+        gameState.lastSpinResult = {
+          spin_number: lastSpin.spin_number,
+          color: lastSpin.color,
+          parity: lastSpin.parity,
+          timestamp: lastSpin.timestamp || lastSpin.created_at
+        };
+      }
+    }
+    
+    return gameState;
   }
 
   /**
@@ -517,6 +502,7 @@ ${roundInfo}
         // Force end the current round/spin and enter idle state
         if (this.isSpinning) {
           // Use direct state change instead of endSpin() to avoid async issues in timer context
+          // Note: Spin result was already stored when spin started, no need to store again
           this.isSpinning = false;
           this.currentSpinIndex = null;
           console.log('🏁 Auto-ended spin due to frontend inactivity (direct state change)');

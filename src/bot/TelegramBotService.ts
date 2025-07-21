@@ -4,9 +4,12 @@ import { Logger } from '../utils/Logger';
 import { SupabaseService } from '../services/SupabaseService';
 import { GameStateManager, GameState, GameStateResponse } from '../services/GameStateManager';
 import { TimeUtils } from '../utils/TimeUtils';
-import { isValidRouletteNumber } from '../utils/RouletteUtils';
+import { isValidRouletteNumber, getRouletteColor, getRouletteParity } from '../utils/RouletteUtils';
 
 export const spinQueue: number[] = [];
+
+// Track spin IDs for database operations
+export const spinIdMap: Map<number, string[]> = new Map(); // spin_number -> array of spin IDs
 
 export class TelegramBotService {
   public bot: TelegramBot;
@@ -46,8 +49,20 @@ export class TelegramBotService {
       }
 
       const oldQueue = [...spinQueue];
+      
+      // Store spin in database immediately when command is received
+      const spinId = await this.storeSpinResult(index);
+      
       spinQueue.push(index);
       const gameState = this.gameStateManager.getGameStateResponse();
+      
+      // Track spin ID for potential deletion
+      if (spinId) {
+        if (!spinIdMap.has(index)) {
+          spinIdMap.set(index, []);
+        }
+        spinIdMap.get(index)!.push(spinId);
+      }
       
       // If game is idle (no active round, no spinning), start a new round
       if (!gameState.roundActive && !gameState.isSpinning && this.gameStateManager.isRunning()) {
@@ -55,8 +70,9 @@ export class TelegramBotService {
         this.gameStateManager.startNewRound();
       }
       
-      this.bot.sendMessage(msg.chat.id, `✅ **Spin Queued Successfully**\n\n🎯 Number: ${index}\n👤 Added by: @${username}\n📋 Queue Position: ${spinQueue.length}\n📊 Total in Queue: ${spinQueue.length}\n🎮 Game State: ${gameState.roundActive ? '🎯 Round Active' : gameState.isSpinning ? '🎰 Spinning' : '💤 Idle'}\n\n⏰ ${TimeUtils.getIndianTimeString()}`);
-      await this.logAction(userId, username, 'add_spin', `Added spin: ${index}`, oldQueue, [...spinQueue], true);
+      const storageStatus = spinId ? '✅ Stored in DB' : '⚠️ DB storage failed';
+      this.bot.sendMessage(msg.chat.id, `✅ **Spin Queued Successfully**\n\n🎯 Number: ${index}\n👤 Added by: @${username}\n📋 Queue Position: ${spinQueue.length}\n📊 Total in Queue: ${spinQueue.length}\n💾 Database: ${storageStatus}\n🎮 Game State: ${gameState.roundActive ? '🎯 Round Active' : gameState.isSpinning ? '🎰 Spinning' : '💤 Idle'}\n\n⏰ ${TimeUtils.getIndianTimeString()}`);
+      await this.logAction(userId, username, 'add_spin', `Added spin: ${index} (DB: ${spinId ? 'stored' : 'failed'})`, oldQueue, [...spinQueue], true);
     });
 
     // Game Status
@@ -117,8 +133,11 @@ export class TelegramBotService {
 
       const deletedCount = initialLength - spinQueue.length;
       if (deletedCount > 0) {
-        this.bot.sendMessage(msg.chat.id, `✅ **Value Deleted Successfully**\n\n🎯 Number: ${valueToDelete}\n🗑️ Instances Removed: ${deletedCount}\n📋 Queue Length: ${initialLength} → ${spinQueue.length}\n📝 Remaining Queue: [${spinQueue.join(', ') || 'empty'}]\n👤 Deleted by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
-        await this.logAction(userId, username, 'delete_value', `Deleted value: ${valueToDelete} (${deletedCount} instances)`, oldQueue, [...spinQueue], true);
+        // Mark deleted spins in database
+        await this.markSpinsAsDeleted(valueToDelete, deletedCount);
+        
+        this.bot.sendMessage(msg.chat.id, `✅ **Value Deleted Successfully**\n\n🎯 Number: ${valueToDelete}\n🗑️ Instances Removed: ${deletedCount}\n📋 Queue Length: ${initialLength} → ${spinQueue.length}\n📝 Remaining Queue: [${spinQueue.join(', ') || 'empty'}]\n💾 Database: Updated (marked as deleted)\n👤 Deleted by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
+        await this.logAction(userId, username, 'delete_value', `Deleted value: ${valueToDelete} (${deletedCount} instances, marked in DB)`, oldQueue, [...spinQueue], true);
       } else {
         this.bot.sendMessage(msg.chat.id, `❌ **Value Not Found**\n\n🎯 Number: ${valueToDelete}\n📋 Current Queue: [${spinQueue.join(', ') || 'empty'}]\n📊 Queue Length: ${spinQueue.length}\n👤 Attempted by: @${username}\n\nThe number ${valueToDelete} was not found in the queue.`);
         await this.logAction(userId, username, 'delete_value_not_found', `Value not found: ${valueToDelete}`, oldQueue, [...spinQueue], false);
@@ -278,6 +297,81 @@ export class TelegramBotService {
   }
 
   /**
+   * Store spin result to database when command is received
+   */
+  public async storeSpinResult(spinNumber: number): Promise<string | null> {
+    // Check if Supabase is configured
+    if (!this.auditService.isConfigured()) {
+      console.warn(`⚠️ Supabase not configured, skipping storage for spin: ${spinNumber}`);
+      return null;
+    }
+
+    const maxRetries = 3;
+    let attempts = 0;
+
+    while (attempts < maxRetries) {
+      try {
+        // Calculate roulette properties for the winning number
+        const color = getRouletteColor(spinNumber);
+        const parity = getRouletteParity(spinNumber);
+        
+        console.log(`💾 Storing spin on command (attempt ${attempts + 1}/${maxRetries}): ${spinNumber} ${color} ${parity}`);
+        
+        const success = await this.auditService.storeSpinResult(spinNumber, color, parity);
+        
+        if (success) {
+          console.log(`✅ Spin stored on Telegram command: ${spinNumber} ${color} ${parity}`);
+          // Note: We can't get the ID from the current implementation, but we track by number
+          return `${spinNumber}-${Date.now()}`; // Generate a tracking ID
+        } else {
+          throw new Error(`Supabase returned false for spin ${spinNumber}`);
+        }
+      } catch (error) {
+        attempts++;
+        Logger.error(`❌ Error storing spin on command (attempt ${attempts}/${maxRetries}): ${error}`);
+        
+        if (attempts >= maxRetries) {
+          Logger.error(`❌ Failed to store spin after ${maxRetries} attempts: ${spinNumber}`);
+          return null; // Return null on failure
+        } else {
+          // Wait before retrying (exponential backoff)
+          const delay = Math.pow(2, attempts) * 1000; // 2s, 4s, 8s
+          console.log(`⏳ Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Mark spins as deleted in database when removed from queue
+   */
+  public async markSpinsAsDeleted(spinNumber: number, deletedCount: number): Promise<void> {
+    if (!this.auditService.isConfigured()) {
+      console.warn(`⚠️ Supabase not configured, skipping deletion marking for spin: ${spinNumber}`);
+      return;
+    }
+
+    try {
+      // Get recent spin results and mark matching ones as deleted
+      const recentSpins = await this.auditService.getLastSpinResults(50, false); // Get last 50 active spins
+      const matchingSpins = recentSpins.filter(spin => spin.spin_number === spinNumber).slice(0, deletedCount);
+      
+      for (const spin of matchingSpins) {
+        if (spin.id) {
+          await this.auditService.softDeleteSpinResult(spin.id);
+          console.log(`🗑️ Marked spin as deleted in DB: ${spin.id} (${spinNumber})`);
+        }
+      }
+      
+      console.log(`✅ Marked ${matchingSpins.length} instances of spin ${spinNumber} as deleted`);
+    } catch (error) {
+      Logger.error(`❌ Error marking spins as deleted: ${error}`);
+    }
+  }
+
+  /**
    * Handle delete queue command
    */
   private async handleDeleteQueue(msg: any): Promise<void> {
@@ -291,15 +385,24 @@ export class TelegramBotService {
 
     const oldQueue = [...spinQueue];
     const queueLength = spinQueue.length;
+    
+    // Mark all queued spins as deleted in database
+    if (queueLength > 0) {
+      for (const spinNumber of oldQueue) {
+        const count = oldQueue.filter(n => n === spinNumber).length;
+        await this.markSpinsAsDeleted(spinNumber, count);
+      }
+    }
+    
     spinQueue.length = 0;
     
     if (queueLength > 0) {
-      this.bot.sendMessage(msg.chat.id, `✅ **Queue Cleared Successfully**\n\n🗑️ Action: QUEUE CLEARED\n📋 Items Removed: ${queueLength}\n📝 Cleared Numbers: [${oldQueue.join(', ')}]\n📊 New Queue Length: 0\n👤 Cleared by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
+      this.bot.sendMessage(msg.chat.id, `✅ **Queue Cleared Successfully**\n\n🗑️ Action: QUEUE CLEARED\n📋 Items Removed: ${queueLength}\n📝 Cleared Numbers: [${oldQueue.join(', ')}]\n💾 Database: All spins marked as deleted\n📊 New Queue Length: 0\n👤 Cleared by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
     } else {
       this.bot.sendMessage(msg.chat.id, `ℹ️ **Queue Already Empty**\n\n📋 Current Queue Length: 0\n👤 Attempted by: @${username}\n\nThe queue was already empty.`);
     }
     
-    await this.logAction(userId, username, 'clear_queue', 'Queue cleared', oldQueue, [], true);
+    await this.logAction(userId, username, 'clear_queue', 'Queue cleared and marked in DB', oldQueue, [], true);
   }
 
   /**

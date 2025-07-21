@@ -85,15 +85,15 @@ export class GameServer {
 
     /**
      * GET /api/game-state - Primary endpoint for frontend polling
-     * Returns current game state for polling-based game flow
+     * Returns current game state for polling-based game flow with last spin result when idle
      */
-    this.app.get('/api/game-state', (req, res) => {
+    this.app.get('/api/game-state', async (req, res) => {
       // Record frontend activity
       this.gameStateManager.recordFrontendActivity();
       
-      const gameState = this.gameStateManager.getGameStateResponse();
+      const gameState = await this.gameStateManager.getGameStateWithLastSpin();
       
-      console.log(`📡 API: Game state requested - Round: ${gameState.roundActive}, Spinning: ${gameState.isSpinning}`);
+      console.log(`📡 API: Game state requested - Round: ${gameState.roundActive}, Spinning: ${gameState.isSpinning}${gameState.lastSpinResult ? `, Last: ${gameState.lastSpinResult.spin_number}` : ''}`);
       
       res.json(gameState);
     });
@@ -109,8 +109,12 @@ export class GameServer {
             const includeDeleted = req.query.includeDeleted === 'true';
             const limit = parseInt(req.query.limit as string) || 5;
             
+            console.log(`🔍 DEBUG: API request - limit: ${limit}, includeDeleted: ${includeDeleted}`);
+            
             const results = await this.gameStateManager.getLastSpinResults(limit, includeDeleted);
             console.log(`🎰 API: Last spin results requested - Found ${results.length} results${includeDeleted ? ' (including deleted)' : ''}`);
+            console.log(`🔍 DEBUG: Results data:`, results);
+            
             res.json({ 
                 results: results,
                 count: results.length,
@@ -122,6 +126,49 @@ export class GameServer {
                 error: 'Failed to fetch spin results',
                 results: [],
                 count: 0 
+            });
+        }
+    });
+
+    /**
+     * POST /api/test/create-sample-spins - Create sample spin results for testing
+     */
+    this.app.post('/api/test/create-sample-spins', async (req, res) => {
+        try {
+            console.log('🧪 Creating sample spin results for testing...');
+            
+            const sampleSpins = [
+                { number: 32, color: 'Red', parity: 'Even' },
+                { number: 0, color: 'Green', parity: 'None' },
+                { number: 15, color: 'Black', parity: 'Odd' },
+                { number: 7, color: 'Red', parity: 'Odd' },
+                { number: 22, color: 'Black', parity: 'Even' },
+                { number: 35, color: 'Black', parity: 'Odd' },
+                { number: 12, color: 'Red', parity: 'Even' }
+            ];
+
+            const results = [];
+            for (const spin of sampleSpins) {
+                const success = await this.supabaseService.storeSpinResult(spin.number, spin.color, spin.parity);
+                if (success) {
+                    results.push(spin);
+                    console.log(`✅ Created sample spin: ${spin.number} ${spin.color} ${spin.parity}`);
+                } else {
+                    console.warn(`⚠️ Failed to create sample spin: ${spin.number}`);
+                }
+            }
+
+            console.log(`🧪 Successfully created ${results.length} sample spin results`);
+            res.json({ 
+                success: true, 
+                message: `Created ${results.length} sample spin results`,
+                results: results
+            });
+        } catch (error) {
+            console.error(`❌ Error creating sample spins:`, error);
+            res.status(500).json({ 
+                success: false, 
+                error: 'Failed to create sample spin results' 
             });
         }
     });
@@ -209,14 +256,14 @@ export class GameServer {
      * POST /api/spin-end - Optional endpoint to manually end spin
      * Can be used by frontend to indicate spin animation is complete
      */
-    this.app.post('/api/spin-end', async (req, res) => {
+    this.app.post('/api/spin-end', (req, res) => {
       // Record frontend activity
       this.gameStateManager.recordFrontendActivity();
       
       const gameState = this.gameStateManager.getGameStateResponse();
       
       if (gameState.isSpinning) {
-        await this.gameStateManager.endSpin();
+        this.gameStateManager.endSpin();
         console.log(`🏁 API: Spin manually ended`);
         res.json({ success: true, message: 'Spin ended successfully' });
       } else {

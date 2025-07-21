@@ -1,3 +1,9 @@
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- 🎰 ROULETTE BACKEND DATABASE SETUP
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- Run this SQL in your Supabase SQL Editor to create all required tables
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 -- Create table for storing roulette spin results
 CREATE TABLE IF NOT EXISTS roulette_spin_results (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -10,24 +16,67 @@ CREATE TABLE IF NOT EXISTS roulette_spin_results (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create index on timestamp for efficient querying of recent results
+-- Create table for bot audit logs
+CREATE TABLE IF NOT EXISTS bot_audit_logs (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    old_value JSONB,
+    new_value JSONB,
+    success BOOLEAN NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create indexes for efficient querying
 CREATE INDEX IF NOT EXISTS idx_roulette_spin_results_timestamp 
 ON roulette_spin_results (timestamp DESC);
 
--- Add RLS (Row Level Security) if needed
+CREATE INDEX IF NOT EXISTS idx_roulette_spin_results_deleted 
+ON roulette_spin_results (is_deleted, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bot_audit_logs_timestamp 
+ON bot_audit_logs (timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bot_audit_logs_user_id 
+ON bot_audit_logs (user_id, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bot_audit_logs_action 
+ON bot_audit_logs (action, timestamp DESC);
+
+-- Enable Row Level Security
 ALTER TABLE roulette_spin_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bot_audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Create policy to allow read access (adjust as needed for your security requirements)
-CREATE POLICY "Allow read access to spin results" ON roulette_spin_results
-FOR SELECT USING (true);
+-- Create policies for public access (adjust as needed for your security requirements)
+CREATE POLICY "Allow all operations on spin results" ON roulette_spin_results
+FOR ALL USING (true);
 
--- Create policy to allow insert access (adjust as needed for your security requirements)
-CREATE POLICY "Allow insert of spin results" ON roulette_spin_results
-FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all operations on audit logs" ON bot_audit_logs
+FOR ALL USING (true);
 
 -- Add comments for documentation
 COMMENT ON TABLE roulette_spin_results IS 'Stores the results of roulette spins including number, color, and parity';
 COMMENT ON COLUMN roulette_spin_results.spin_number IS 'The winning number (0-36)';
 COMMENT ON COLUMN roulette_spin_results.color IS 'The color of the winning number (Red, Black, Green)';
 COMMENT ON COLUMN roulette_spin_results.parity IS 'Whether the number is Odd, Even, or None (for zero)';
-COMMENT ON COLUMN roulette_spin_results.timestamp IS 'When the spin occurred (IST/Indian timezone)'; 
+COMMENT ON COLUMN roulette_spin_results.timestamp IS 'When the spin occurred (IST/Indian timezone)';
+
+COMMENT ON TABLE bot_audit_logs IS 'Stores audit logs of all bot actions and game operations';
+COMMENT ON COLUMN bot_audit_logs.user_id IS 'Telegram user ID who performed the action';
+COMMENT ON COLUMN bot_audit_logs.username IS 'Telegram username of the user';
+COMMENT ON COLUMN bot_audit_logs.action IS 'Type of action performed';
+COMMENT ON COLUMN bot_audit_logs.old_value IS 'State before the action (JSON)';
+COMMENT ON COLUMN bot_audit_logs.new_value IS 'State after the action (JSON)';
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- ✅ SETUP COMPLETE!
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- Your database is now ready for the roulette backend!
+-- 
+-- Next steps:
+-- 1. Configure environment variables in Render
+-- 2. Deploy your backend
+-- 3. Test with Telegram bot commands
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
