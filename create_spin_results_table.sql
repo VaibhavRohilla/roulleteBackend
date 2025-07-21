@@ -10,11 +10,34 @@ CREATE TABLE IF NOT EXISTS roulette_spin_results (
     spin_number INTEGER NOT NULL CHECK (spin_number >= 0 AND spin_number <= 36),
     color TEXT NOT NULL CHECK (color IN ('Red', 'Black', 'Green')),
     parity TEXT NOT NULL CHECK (parity IN ('Odd', 'Even', 'None')),
+    doneby TEXT NOT NULL,
     is_deleted BOOLEAN DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add doneby column to existing table (for database upgrades)
+DO $$
+BEGIN
+    -- Add column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'roulette_spin_results' 
+                   AND column_name = 'doneby') THEN
+        ALTER TABLE roulette_spin_results ADD COLUMN doneby TEXT;
+    END IF;
+    
+    -- Update any NULL values to 'System' for existing records
+    UPDATE roulette_spin_results SET doneby = 'System' WHERE doneby IS NULL;
+    
+    -- Make column NOT NULL if it isn't already
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'roulette_spin_results' 
+               AND column_name = 'doneby' 
+               AND is_nullable = 'YES') THEN
+        ALTER TABLE roulette_spin_results ALTER COLUMN doneby SET NOT NULL;
+    END IF;
+END $$;
 
 -- Create table for bot audit logs
 CREATE TABLE IF NOT EXISTS bot_audit_logs (
@@ -61,6 +84,7 @@ COMMENT ON TABLE roulette_spin_results IS 'Stores the results of roulette spins 
 COMMENT ON COLUMN roulette_spin_results.spin_number IS 'The winning number (0-36)';
 COMMENT ON COLUMN roulette_spin_results.color IS 'The color of the winning number (Red, Black, Green)';
 COMMENT ON COLUMN roulette_spin_results.parity IS 'Whether the number is Odd, Even, or None (for zero)';
+COMMENT ON COLUMN roulette_spin_results.doneby IS 'Telegram username of the user who added this spin';
 COMMENT ON COLUMN roulette_spin_results.timestamp IS 'When the spin occurred (IST/Indian timezone)';
 
 COMMENT ON TABLE bot_audit_logs IS 'Stores audit logs of all bot actions and game operations';

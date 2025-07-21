@@ -58,7 +58,7 @@ export class TelegramBotService {
       }
 
       // Store spin in database immediately when command is received
-      const spinId = await this.storeSpinResult(index);
+      const spinId = await this.storeSpinResult(index, username);
       
       // Refresh last spin cache since we added a new spin
       if (spinId) {
@@ -245,7 +245,7 @@ export class TelegramBotService {
         let resultText = `📊 **RECENT SPIN RESULTS (${results.length})**\n\n`;
         results.forEach((result, index) => {
           const resultTime = result.timestamp ? new Date(result.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Unknown time';
-          resultText += `${index + 1}. 🎯 **${result.spin_number}** ${result.color} ${result.parity}\n   📅 ${resultTime}\n\n`;
+          resultText += `${index + 1}. 🎯 **${result.spin_number}** ${result.color} ${result.parity}\n   👤 Added by: ${result.doneby}\n   📅 ${resultTime}\n\n`;
         });
 
         resultText += `👤 **Requested by:** @${username}\n⏰ **Generated at:** ${TimeUtils.getIndianTimeString()}`;
@@ -311,7 +311,7 @@ export class TelegramBotService {
   /**
    * Store spin result to database when command is received
    */
-  public async storeSpinResult(spinNumber: number): Promise<string | null> {
+  public async storeSpinResult(spinNumber: number, username: string): Promise<string | null> {
     // Check if Supabase is configured
     if (!this.auditService.isConfigured()) {
       console.warn(`⚠️ Supabase not configured, skipping storage for spin: ${spinNumber}`);
@@ -327,12 +327,12 @@ export class TelegramBotService {
         const color = getRouletteColor(spinNumber);
         const parity = getRouletteParity(spinNumber);
         
-        console.log(`💾 Storing spin on command (attempt ${attempts + 1}/${maxRetries}): ${spinNumber} ${color} ${parity}`);
+        console.log(`💾 Storing spin on command (attempt ${attempts + 1}/${maxRetries}): ${spinNumber} ${color} ${parity} (by: ${username})`);
         
-        const success = await this.auditService.storeSpinResult(spinNumber, color, parity);
+        const success = await this.auditService.storeSpinResult(spinNumber, color, parity, username);
         
         if (success) {
-          console.log(`✅ Spin stored on Telegram command: ${spinNumber} ${color} ${parity}`);
+          console.log(`✅ Spin stored on Telegram command: ${spinNumber} ${color} ${parity} (by: ${username})`);
           // Note: We can't get the ID from the current implementation, but we track by number
           return `${spinNumber}-${Date.now()}`; // Generate a tracking ID
         } else {
@@ -409,7 +409,7 @@ export class TelegramBotService {
     spinQueue.length = 0;
     
     if (queueLength > 0) {
-      this.bot.sendMessage(msg.chat.id, `✅ **Queue Cleared Successfully**\n\n🗑️ Action: QUEUE CLEARED\n📋 Items Removed: ${queueLength}\n📝 Cleared Numbers: [${oldQueue.join(', ')}]\n💾 Database: All spins marked as deleted\n📊 New Queue Length: 0\n👤 Cleared by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
+      this.bot.sendMessage(msg.chat.id, `✅ **Queue Cleared Successfully**\n\n🗑️ Action: QUEUE CLEARED\n📋 Items Removed: ${queueLength}\n�� Cleared Numbers: [${oldQueue.join(', ')}]\n💾 Database: All spins marked as deleted\n📊 New Queue Length: 0\n👤 Cleared by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}`);
     } else {
       this.bot.sendMessage(msg.chat.id, `ℹ️ **Queue Already Empty**\n\n📋 Current Queue Length: 0\n👤 Attempted by: @${username}\n\nThe queue was already empty.`);
     }

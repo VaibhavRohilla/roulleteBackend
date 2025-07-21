@@ -21,6 +21,7 @@ export interface SpinResult {
   spin_number: number;
   color: string;
   parity: string;
+  doneby: string;
   is_deleted?: boolean;
   deleted_at?: string;
   timestamp?: string;
@@ -92,7 +93,7 @@ export class SupabaseService {
   /**
    * Store a spin result in the database
    */
-  public async storeSpinResult(spinNumber: number, color: string, parity: string): Promise<boolean> {
+  public async storeSpinResult(spinNumber: number, color: string, parity: string, doneby: string): Promise<boolean> {
     if (!this.client) {
       Logger.warn('📊 Supabase not configured, skipping spin result storage');
       return false;
@@ -105,6 +106,7 @@ export class SupabaseService {
           spin_number: spinNumber,
           color: color,
           parity: parity,
+          doneby: doneby,
           timestamp: TimeUtils.getIndianISOForDB()
         }]);
 
@@ -112,7 +114,7 @@ export class SupabaseService {
         Logger.error(`❌ Failed to store spin result: ${error.message}`);
         return false;
       } else {
-        console.log(`🎰 Spin result stored: ${spinNumber} ${color} ${parity}`);
+        console.log(`🎰 Spin result stored: ${spinNumber} ${color} ${parity} (by: ${doneby})`);
         return true;
       }
     } catch (error) {
@@ -196,6 +198,7 @@ export class SupabaseService {
         spin_number: 32,
         color: 'Red',
         parity: 'Even',
+        doneby: '@admin1',
         is_deleted: false,
         timestamp:TimeUtils.getIndianISOForDB(),
         created_at:TimeUtils.getIndianISOForDB()
@@ -205,6 +208,7 @@ export class SupabaseService {
         spin_number: 0,
         color: 'Green',
         parity: 'None',
+        doneby: '@admin2',
         is_deleted: false,
         timestamp:TimeUtils.getIndianISOForDB(),
         created_at:TimeUtils.getIndianISOForDB()
@@ -214,6 +218,7 @@ export class SupabaseService {
         spin_number: 15,
         color: 'Black',
         parity: 'Odd',
+        doneby: '@admin1',
         is_deleted: false,
         timestamp:TimeUtils.getIndianISOForDB(),
         created_at:TimeUtils.getIndianISOForDB()
@@ -223,6 +228,7 @@ export class SupabaseService {
         spin_number: 7,
         color: 'Red',
         parity: 'Odd',
+        doneby: '@admin3',
         is_deleted: true,
         deleted_at:TimeUtils.getIndianISOForDB(),
         timestamp:TimeUtils.getIndianISOForDB(),
@@ -233,6 +239,7 @@ export class SupabaseService {
         spin_number: 22,
         color: 'Black',
         parity: 'Even',
+        doneby: '@admin2',
         is_deleted: false,
         timestamp:TimeUtils.getIndianISOForDB(),
         created_at:TimeUtils.getIndianISOForDB()
@@ -242,6 +249,7 @@ export class SupabaseService {
         spin_number: 35,
         color: 'Black',
         parity: 'Odd',
+        doneby: '@admin1',
         is_deleted: false,
         timestamp:TimeUtils.getIndianISOForDB(),
         created_at:TimeUtils.getIndianISOForDB()
@@ -251,6 +259,7 @@ export class SupabaseService {
         spin_number: 12,
         color: 'Red',
         parity: 'Even',
+        doneby: '@admin3',
         is_deleted: true,
         deleted_at:TimeUtils.getIndianISOForDB(),
         timestamp:TimeUtils.getIndianISOForDB(),
