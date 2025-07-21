@@ -209,14 +209,14 @@ export class GameServer {
      * POST /api/spin-end - Optional endpoint to manually end spin
      * Can be used by frontend to indicate spin animation is complete
      */
-    this.app.post('/api/spin-end', (req, res) => {
+    this.app.post('/api/spin-end', async (req, res) => {
       // Record frontend activity
       this.gameStateManager.recordFrontendActivity();
       
       const gameState = this.gameStateManager.getGameStateResponse();
       
       if (gameState.isSpinning) {
-        this.gameStateManager.endSpin();
+        await this.gameStateManager.endSpin();
         console.log(`🏁 API: Spin manually ended`);
         res.json({ success: true, message: 'Spin ended successfully' });
       } else {
@@ -229,8 +229,8 @@ export class GameServer {
      * POST /api/trigger-round-end - Manual control endpoint
      * Allows manual triggering of round end (for testing/admin control)
      */
-    this.app.post('/api/trigger-round-end', (req, res) => {
-      const success = this.gameStateManager.triggerRoundEnd();
+    this.app.post('/api/trigger-round-end', async (req, res) => {
+      const success = await this.gameStateManager.triggerRoundEnd();
       
       if (success) {
         console.log(`🎮 API: Round manually triggered to end`);
@@ -245,7 +245,7 @@ export class GameServer {
      * POST /api/trigger-spin - Manual spin trigger endpoint
      * Allows manual triggering of specific spin index
      */
-    this.app.post('/api/trigger-spin', (req, res) => {
+    this.app.post('/api/trigger-spin', async (req, res) => {
       const { spinIndex } = req.body;
       
       if (typeof spinIndex !== 'number') {
@@ -253,7 +253,7 @@ export class GameServer {
         return;
       }
       
-      const success = this.gameStateManager.triggerManualSpin(spinIndex);
+      const success = await this.gameStateManager.triggerManualSpin(spinIndex);
       
       if (success) {
         console.log(`🎮 API: Manual spin triggered - Index: ${spinIndex}`);
@@ -268,8 +268,8 @@ export class GameServer {
      * POST /api/trigger-random-spin - Random spin trigger endpoint  
      * Generates and triggers a random spin (for testing)
      */
-    this.app.post('/api/trigger-random-spin', (req, res) => {
-      const success = this.gameStateManager.triggerRandomSpin();
+    this.app.post('/api/trigger-random-spin', async (req, res) => {
+      const success = await this.gameStateManager.triggerRandomSpin();
       
       if (success) {
         console.log(`🎲 API: Random spin triggered`);

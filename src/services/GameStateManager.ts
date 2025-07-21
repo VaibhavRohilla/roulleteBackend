@@ -151,8 +151,8 @@ export class GameStateManager {
     console.log(`🕒 New round started - Duration: ${this.roundDuration}ms`);
     
     // Auto-end round after duration
-    setTimeout(() => {
-      this.endRound();
+    setTimeout(async () => {
+      await this.endRound();
     }, this.roundDuration);
 
     return true;
@@ -161,7 +161,7 @@ export class GameStateManager {
   /**
    * End the current round and trigger spin
    */
-  public endRound(): void {
+  public async endRound(): Promise<void> {
     if (!this.roundActive) {
       console.log('❌ Cannot end round - no active round');
       return;
@@ -188,6 +188,9 @@ export class GameStateManager {
     this.currentSpinIndex = spins[0];
     console.log(`🌀 Using queued spin: ${this.currentSpinIndex}`);
     
+    // Log spin processing to audit trail
+    await this.logSpinProcessing(spins[0], spins, spins.length - 1);
+    
     // Put remaining spins back in queue
     if (spins.length > 1) {
       spinQueue.unshift(...spins.slice(1));
@@ -201,15 +204,15 @@ export class GameStateManager {
     
     // Auto-end spin after frontend animation duration
     const spinDuration = CONFIG.FRONTEND_SPIN_DURATION + CONFIG.SPIN_BUFFER_TIME;
-    setTimeout(() => {
-      this.endSpin();
+    setTimeout(async () => {
+      await this.endSpin();
     }, spinDuration);
   }
 
   /**
    * End the current spin and enter idle state
    */
-  public endSpin(): void {
+  public async endSpin(): Promise<void> {
     if (!this.isSpinning) {
       console.log('❌ Cannot end spin - no active spin');
       return;
@@ -217,7 +220,13 @@ export class GameStateManager {
 
     // Store the spin result before ending the spin
     if (this.currentSpinIndex !== null) {
-      this.storeSpinResult(this.currentSpinIndex);
+      try {
+        await this.storeSpinResult(this.currentSpinIndex);
+        console.log('✅ Spin result stored successfully before ending spin');
+      } catch (error) {
+        Logger.error(`❌ Failed to store spin result before ending spin: ${error}`);
+        // Continue ending the spin even if storage fails to avoid getting stuck
+      }
     }
 
     this.isSpinning = false;
@@ -227,25 +236,48 @@ export class GameStateManager {
   }
 
   /**
-   * Store spin result to database
+   * Store spin result to database with retry logic
    */
   private async storeSpinResult(spinNumber: number): Promise<void> {
-    try {
-      // Calculate roulette properties for the winning number
-      const color = getRouletteColor(spinNumber);
-      const parity = getRouletteParity(spinNumber);
-      
-      console.log(`💾 Storing spin result: ${spinNumber} ${color} ${parity}`);
-      
-      const success = await this.supabaseService.storeSpinResult(spinNumber, color, parity);
-      
-      if (success) {
-        console.log(`✅ Spin result stored successfully: ${spinNumber} ${color} ${parity}`);
-      } else {
-        console.warn(`⚠️ Failed to store spin result: ${spinNumber}`);
+    // Check if Supabase is configured
+    if (!this.supabaseService.isConfigured()) {
+      console.warn(`⚠️ Supabase not configured, skipping storage for spin: ${spinNumber}`);
+      return;
+    }
+
+    const maxRetries = 3;
+    let attempts = 0;
+
+    while (attempts < maxRetries) {
+      try {
+        // Calculate roulette properties for the winning number
+        const color = getRouletteColor(spinNumber);
+        const parity = getRouletteParity(spinNumber);
+        
+        console.log(`💾 Storing spin result (attempt ${attempts + 1}/${maxRetries}): ${spinNumber} ${color} ${parity}`);
+        
+        const success = await this.supabaseService.storeSpinResult(spinNumber, color, parity);
+        
+        if (success) {
+          console.log(`✅ Spin result stored successfully: ${spinNumber} ${color} ${parity}`);
+          return; // Success, exit retry loop
+        } else {
+          throw new Error(`Supabase returned false for spin ${spinNumber}`);
+        }
+      } catch (error) {
+        attempts++;
+        Logger.error(`❌ Error storing spin result (attempt ${attempts}/${maxRetries}): ${error}`);
+        
+        if (attempts >= maxRetries) {
+          Logger.error(`❌ Failed to store spin result after ${maxRetries} attempts: ${spinNumber}`);
+          throw error; // Re-throw after max attempts
+        } else {
+          // Wait before retrying (exponential backoff)
+          const delay = Math.pow(2, attempts) * 1000; // 2s, 4s, 8s
+          console.log(`⏳ Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
-    } catch (error) {
-      Logger.error(`❌ Error storing spin result: ${error}`);
     }
   }
 
@@ -263,6 +295,27 @@ export class GameStateManager {
     } catch (error) {
       Logger.error(`❌ Error retrieving spin results: ${error}`);
       return [];
+    }
+  }
+
+  /**
+   * Log spin processing to audit trail
+   */
+  private async logSpinProcessing(usedSpin: number, originalQueue: number[], remainingCount: number): Promise<void> {
+    try {
+      await this.supabaseService.logAction({
+        user_id: 0, // System action
+        username: 'GameStateManager',
+        action: 'process_spin',
+        details: `Processed spin: ${usedSpin} from queue. ${remainingCount} spins returned to queue.`,
+        old_value: originalQueue,
+        new_value: spinQueue.length > 0 ? [...spinQueue] : [],
+        success: true
+      });
+      console.log(`📋 Audit logged: Processed spin ${usedSpin}, ${remainingCount} spins returned to queue`);
+    } catch (error) {
+      Logger.error(`❌ Failed to log spin processing: ${error}`);
+      // Don't throw - this shouldn't stop game flow
     }
   }
 
@@ -303,20 +356,20 @@ export class GameStateManager {
   /**
    * Force trigger a round end (for manual control)
    */
-  public triggerRoundEnd(): boolean {
+  public async triggerRoundEnd(): Promise<boolean> {
     if (!this.roundActive) {
       return false;
     }
     
     console.log('🎮 Manually triggering round end');
-    this.endRound();
+    await this.endRound();
     return true;
   }
 
   /**
    * Manually trigger a spin with specific index (for testing/admin)
    */
-  public triggerManualSpin(spinIndex: number): boolean {
+  public async triggerManualSpin(spinIndex: number): Promise<boolean> {
     if (!isValidRouletteNumber(spinIndex)) {
       console.log(`❌ Invalid spin index: ${spinIndex}. Must be 0-36`);
       return false;
@@ -333,7 +386,7 @@ export class GameStateManager {
 
     if (this.roundActive) {
       console.log('🎮 Triggering round end to process manual spin');
-      this.endRound();
+      await this.endRound();
     } else {
       console.log('🎮 Manual spin queued - will process in next round');
     }
@@ -344,10 +397,10 @@ export class GameStateManager {
   /**
    * Generate a random spin and add to queue (for testing only)
    */
-  public triggerRandomSpin(): boolean {
+  public async triggerRandomSpin(): Promise<boolean> {
     const randomIndex = Math.floor(Math.random() * 37);
     console.log(`🎲 Generating random spin: ${randomIndex}`);
-    return this.triggerManualSpin(randomIndex);
+    return await this.triggerManualSpin(randomIndex);
   }
 
   /**
@@ -463,9 +516,10 @@ ${roundInfo}
         
         // Force end the current round/spin and enter idle state
         if (this.isSpinning) {
+          // Use direct state change instead of endSpin() to avoid async issues in timer context
           this.isSpinning = false;
           this.currentSpinIndex = null;
-          console.log('🏁 Auto-ended spin due to frontend inactivity');
+          console.log('🏁 Auto-ended spin due to frontend inactivity (direct state change)');
         }
         
         if (this.roundActive) {

@@ -189,6 +189,45 @@ export class TelegramBotService {
       await this.logAction(userId, username, 'reset_game', 'Full game reset', { queue: oldQueue, state: oldState }, { queue: [], state: GameState.RUNNING }, true);
     });
 
+    // View recent spin results
+    this.bot.onText(/\/results\s*(\d*)/, async (msg, match) => {
+      const userId = msg.from!.id;
+      const username = msg.from?.username || msg.from?.first_name || 'Unknown';
+
+      if (!this.isAdmin(userId)) {
+        this.bot.sendMessage(msg.chat.id, `❌ **Access Denied**\n\nUser: @${username}\nCommand: /results\nStatus: UNAUTHORIZED\n\nOnly admins can view spin results.`);
+        return;
+      }
+
+      try {
+        const limit = parseInt(match![1]) || 5;
+        const maxLimit = 10;
+        const actualLimit = Math.min(limit, maxLimit);
+        
+        const results = await this.auditService.getLastSpinResults(actualLimit);
+        
+        if (results.length === 0) {
+          this.bot.sendMessage(msg.chat.id, `📊 **No Spin Results Found**\n\n📋 Recent spin results: 0\n👤 Requested by: @${username}\n⏰ ${TimeUtils.getIndianTimeString()}\n\nNo spin results are stored in the database yet.`);
+          return;
+        }
+
+        let resultText = `📊 **RECENT SPIN RESULTS (${results.length})**\n\n`;
+        results.forEach((result, index) => {
+          const resultTime = result.timestamp ? new Date(result.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Unknown time';
+          resultText += `${index + 1}. 🎯 **${result.spin_number}** ${result.color} ${result.parity}\n   📅 ${resultTime}\n\n`;
+        });
+
+        resultText += `👤 **Requested by:** @${username}\n⏰ **Generated at:** ${TimeUtils.getIndianTimeString()}`;
+
+        this.bot.sendMessage(msg.chat.id, resultText);
+        await this.logAction(userId, username, 'view_results', `Viewed ${results.length} recent spin results`, null, null, true);
+      } catch (error) {
+        Logger.error(`❌ Error fetching spin results: ${error}`);
+        this.bot.sendMessage(msg.chat.id, `❌ **Error Fetching Results**\n\n📊 Failed to retrieve spin results\n📝 Error: Database connection issue\n👤 Requested by: @${username}\n\nPlease try again later or contact support.`);
+        await this.logAction(userId, username, 'view_results_error', `Error fetching results: ${error}`, null, null, false);
+      }
+    });
+
     // Help command
     this.bot.onText(/\/help/, async (msg) => {
       const userId = msg.from!.id;
@@ -212,6 +251,9 @@ export class TelegramBotService {
 • \`/resume\` - Resume paused game
 • \`/stop\` - Pause game rounds
 • \`/reset\` - Full reset (queue + state)
+
+📊 **DATA & RESULTS:**
+• \`/results [limit]\` - View recent spin results (max 10)
 
 ℹ️ **CURRENT STATUS:**
 🎮 Game State: ${this.gameStateManager.getState().toUpperCase()}

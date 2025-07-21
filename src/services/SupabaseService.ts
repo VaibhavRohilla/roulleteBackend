@@ -98,25 +98,43 @@ export class SupabaseService {
       return false;
     }
 
+    // Validate input data
+    if (!Number.isInteger(spinNumber) || spinNumber < 0 || spinNumber > 36) {
+      Logger.error(`❌ Invalid spin number: ${spinNumber}. Must be 0-36.`);
+      return false;
+    }
+
+    if (!color || !parity) {
+      Logger.error(`❌ Invalid color or parity: color='${color}', parity='${parity}'`);
+      return false;
+    }
+
     try {
-      const { error } = await this.client
+      const timestamp = TimeUtils.getIndianISOForDB();
+      console.log(`📊 Attempting to store spin result: ${spinNumber} ${color} ${parity} at ${timestamp}`);
+
+      const { data, error } = await this.client
         .from('roulette_spin_results')
         .insert([{
           spin_number: spinNumber,
           color: color,
           parity: parity,
-          timestamp: TimeUtils.getIndianISOForDB()
-        }]);
+          timestamp: timestamp
+        }])
+        .select(); // Add select to get the inserted record
 
       if (error) {
         Logger.error(`❌ Failed to store spin result: ${error.message}`);
+        Logger.error(`❌ Error details: ${JSON.stringify(error, null, 2)}`);
         return false;
       } else {
-        console.log(`🎰 Spin result stored: ${spinNumber} ${color} ${parity}`);
+        console.log(`🎰 Spin result stored successfully: ${spinNumber} ${color} ${parity}`);
+        console.log(`📊 Inserted record: ${data?.[0]?.id ? `ID: ${data[0].id}` : 'No ID returned'}`);
         return true;
       }
     } catch (error) {
       Logger.error(`❌ Supabase error storing spin result: ${error}`);
+      Logger.error(`❌ Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
       return false;
     }
   }
