@@ -232,18 +232,18 @@ export class GameServer {
             console.log('🧪 Creating sample spin results for testing...');
             
             const sampleSpins = [
-                { number: 32, color: 'Red', parity: 'Even' },
-                { number: 0, color: 'Green', parity: 'None' },
-                { number: 15, color: 'Black', parity: 'Odd' },
-                { number: 7, color: 'Red', parity: 'Odd' },
-                { number: 22, color: 'Black', parity: 'Even' },
-                { number: 35, color: 'Black', parity: 'Odd' },
-                { number: 12, color: 'Red', parity: 'Even' }
+                { number: 32, color: 'Red', parity: 'Even',doneby: "@admin" },
+                { number: 0, color: 'Green', parity: 'None',doneby: "@admin" },
+                { number: 15, color: 'Black', parity: 'Odd',doneby: "@admin" },
+                { number: 7, color: 'Red', parity: 'Odd',doneby: "@admin" },
+                { number: 22, color: 'Black', parity: 'Even',doneby: "@admin" },
+                { number: 35, color: 'Black', parity: 'Odd',doneby: "@admin" },
+                { number: 12, color: 'Red', parity: 'Even',doneby: "@admin" }
             ];
 
             const results = [];
             for (const spin of sampleSpins) {
-                const success = await this.supabaseService.storeSpinResult(spin.number, spin.color, spin.parity);
+                const success = await this.supabaseService.storeSpinResult(spin.number, spin.color, spin.parity, spin.doneby);
                 if (success) {
                     results.push(spin);
                     console.log(`✅ Created sample spin: ${spin.number} ${spin.color} ${spin.parity}`);
