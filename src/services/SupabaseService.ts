@@ -197,8 +197,8 @@ export class SupabaseService {
         color: 'Red',
         parity: 'Even',
         is_deleted: false,
-        timestamp: new Date().toISOString(),
-        created_at: new Date().toISOString()
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       },
       {
         id: 'mock-2',
@@ -206,8 +206,8 @@ export class SupabaseService {
         color: 'Green',
         parity: 'None',
         is_deleted: false,
-        timestamp: new Date(Date.now() - 60000).toISOString(),
-        created_at: new Date(Date.now() - 60000).toISOString()
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       },
       {
         id: 'mock-3',
@@ -215,8 +215,8 @@ export class SupabaseService {
         color: 'Black',
         parity: 'Odd',
         is_deleted: false,
-        timestamp: new Date(Date.now() - 120000).toISOString(),
-        created_at: new Date(Date.now() - 120000).toISOString()
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       },
       {
         id: 'mock-4',
@@ -224,9 +224,9 @@ export class SupabaseService {
         color: 'Red',
         parity: 'Odd',
         is_deleted: true,
-        deleted_at: new Date(Date.now() - 30000).toISOString(),
-        timestamp: new Date(Date.now() - 180000).toISOString(),
-        created_at: new Date(Date.now() - 180000).toISOString()
+        deleted_at:TimeUtils.getIndianISOForDB(),
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       },
       {
         id: 'mock-5',
@@ -234,8 +234,8 @@ export class SupabaseService {
         color: 'Black',
         parity: 'Even',
         is_deleted: false,
-        timestamp: new Date(Date.now() - 240000).toISOString(),
-        created_at: new Date(Date.now() - 240000).toISOString()
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       },
       {
         id: 'mock-6',
@@ -243,8 +243,8 @@ export class SupabaseService {
         color: 'Black',
         parity: 'Odd',
         is_deleted: false,
-        timestamp: new Date(Date.now() - 300000).toISOString(),
-        created_at: new Date(Date.now() - 300000).toISOString()
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       },
       {
         id: 'mock-7',
@@ -252,9 +252,9 @@ export class SupabaseService {
         color: 'Red',
         parity: 'Even',
         is_deleted: true,
-        deleted_at: new Date(Date.now() - 60000).toISOString(),
-        timestamp: new Date(Date.now() - 360000).toISOString(),
-        created_at: new Date(Date.now() - 360000).toISOString()
+        deleted_at:TimeUtils.getIndianISOForDB(),
+        timestamp:TimeUtils.getIndianISOForDB(),
+        created_at:TimeUtils.getIndianISOForDB()
       }
     ];
 
@@ -284,7 +284,7 @@ export class SupabaseService {
         .from('roulette_spin_results')
         .update({
           is_deleted: true,
-          deleted_at: new Date().toISOString()
+          deleted_at:TimeUtils.getIndianISOForDB()
         })
         .eq('id', id);
 
