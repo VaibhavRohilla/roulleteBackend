@@ -78,9 +78,7 @@ export class GameServer {
 
     // Enable CORS for all routes
     this.app.use(cors({
-      origin: CONFIG.IS_PRODUCTION ? 
-        ['https://your-production-domain.com'] : // TODO: Replace with actual domain
-        '*',
+      origin: '*',
       credentials: true,
       optionsSuccessStatus: 200
     }));
