@@ -4,6 +4,7 @@ import { Logger } from '../utils/Logger';
 import { SupabaseService } from '../services/SupabaseService';
 import { GameStateManager, GameState, GameStateResponse } from '../services/GameStateManager';
 import { TimeUtils } from '../utils/TimeUtils';
+import { isValidRouletteNumber } from '../utils/RouletteUtils';
 
 export const spinQueue: number[] = [];
 
@@ -38,7 +39,7 @@ export class TelegramBotService {
         return;
       }
 
-      if (index < 0 || index > 36) {
+      if (!isValidRouletteNumber(index)) {
         this.bot.sendMessage(msg.chat.id, `❌ **Invalid Spin Number**\n\nInput: ${index}\nValid Range: 0-36\nUser: @${username}\n\nPlease use a number between 0 and 36 for European Roulette.`);
         await this.logAction(userId, username, 'add_spin_invalid', `Invalid spin number: ${index}`, null, null, false);
         return;

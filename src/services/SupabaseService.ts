@@ -16,6 +16,17 @@ export interface AuditLog {
   success: boolean;
 }
 
+export interface SpinResult {
+  id?: string;
+  spin_number: number;
+  color: string;
+  parity: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  timestamp?: string;
+  created_at?: string;
+}
+
 export class SupabaseService {
   private static instance: SupabaseService;
   private client: SupabaseClient;
@@ -75,6 +86,165 @@ export class SupabaseService {
       }
     } catch (error) {
       Logger.error(`❌ Supabase error: ${error}`);
+    }
+  }
+
+  /**
+   * Store a spin result in the database
+   */
+  public async storeSpinResult(spinNumber: number, color: string, parity: string): Promise<boolean> {
+    if (!this.client) {
+      Logger.warn('📊 Supabase not configured, skipping spin result storage');
+      return false;
+    }
+
+    try {
+      const { error } = await this.client
+        .from('roulette_spin_results')
+        .insert([{
+          spin_number: spinNumber,
+          color: color,
+          parity: parity,
+          timestamp: TimeUtils.getIndianISOForDB()
+        }]);
+
+      if (error) {
+        Logger.error(`❌ Failed to store spin result: ${error.message}`);
+        return false;
+      } else {
+        console.log(`🎰 Spin result stored: ${spinNumber} ${color} ${parity}`);
+        return true;
+      }
+    } catch (error) {
+      Logger.error(`❌ Supabase error storing spin result: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get the last N spin results (default 5)
+   */
+  public async getLastSpinResults(limit: number = 5, includeDeleted: boolean = false): Promise<SpinResult[]> {
+    if (!this.client) {
+      Logger.warn('📊 Supabase not configured, returning empty spin results');
+      return [];
+    }
+
+    try {
+      let query = this.client
+        .from('roulette_spin_results')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+      // Filter out deleted results unless explicitly requested
+      if (!includeDeleted) {
+        query = query.eq('is_deleted', false);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        Logger.error(`❌ Failed to fetch spin results: ${error.message}`);
+        return [];
+      }
+
+      const resultText = includeDeleted ? 'spin results (including deleted)' : 'active spin results';
+      console.log(`🎰 Retrieved ${data?.length || 0} ${resultText}`);
+      return data || [];
+    } catch (error) {
+      Logger.error(`❌ Supabase error fetching spin results: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Soft delete a spin result by ID
+   */
+  public async softDeleteSpinResult(id: string): Promise<boolean> {
+    if (!this.client) {
+      Logger.warn('📊 Supabase not configured, skipping spin result deletion');
+      return false;
+    }
+
+    try {
+      const { error } = await this.client
+        .from('roulette_spin_results')
+        .update({
+          is_deleted: true,
+          deleted_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      if (error) {
+        Logger.error(`❌ Failed to soft delete spin result: ${error.message}`);
+        return false;
+      } else {
+        console.log(`🗑️ Spin result soft deleted: ${id}`);
+        return true;
+      }
+    } catch (error) {
+      Logger.error(`❌ Supabase error soft deleting spin result: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Restore a soft deleted spin result by ID
+   */
+  public async restoreSpinResult(id: string): Promise<boolean> {
+    if (!this.client) {
+      Logger.warn('📊 Supabase not configured, skipping spin result restoration');
+      return false;
+    }
+
+    try {
+      const { error } = await this.client
+        .from('roulette_spin_results')
+        .update({
+          is_deleted: false,
+          deleted_at: null
+        })
+        .eq('id', id);
+
+      if (error) {
+        Logger.error(`❌ Failed to restore spin result: ${error.message}`);
+        return false;
+      } else {
+        console.log(`♻️ Spin result restored: ${id}`);
+        return true;
+      }
+    } catch (error) {
+      Logger.error(`❌ Supabase error restoring spin result: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Permanently delete a spin result by ID (hard delete)
+   */
+  public async permanentlyDeleteSpinResult(id: string): Promise<boolean> {
+    if (!this.client) {
+      Logger.warn('📊 Supabase not configured, skipping permanent deletion');
+      return false;
+    }
+
+    try {
+      const { error } = await this.client
+        .from('roulette_spin_results')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        Logger.error(`❌ Failed to permanently delete spin result: ${error.message}`);
+        return false;
+      } else {
+        console.log(`💥 Spin result permanently deleted: ${id}`);
+        return true;
+      }
+    } catch (error) {
+      Logger.error(`❌ Supabase error permanently deleting spin result: ${error}`);
+      return false;
     }
   }
 

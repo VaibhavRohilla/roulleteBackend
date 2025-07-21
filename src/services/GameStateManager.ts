@@ -2,6 +2,8 @@ import { Logger } from '../utils/Logger';
 import { spinQueue } from '../bot/TelegramBotService';
 import { CONFIG } from '../config/config';
 import { TimeUtils } from '../utils/TimeUtils';
+import { SupabaseService } from './SupabaseService';
+import { getRouletteColor, getRouletteParity, isValidRouletteNumber } from '../utils/RouletteUtils';
 
 export enum GameState {
   RUNNING = 'running',
@@ -22,6 +24,7 @@ export class GameStateManager {
   private currentState: GameState = GameState.RUNNING;
   private pauseCallbacks: Array<() => void> = [];
   private resumeCallbacks: Array<() => void> = [];
+  private supabaseService: SupabaseService;
   
   // API-driven game state tracking
   private roundActive: boolean = false;
@@ -36,6 +39,7 @@ export class GameStateManager {
 
   private constructor() {
     console.log('🎮 GameStateManager initialized with API-driven state tracking');
+    this.supabaseService = SupabaseService.getInstance();
     this.startActivityMonitoring();
   }
 
@@ -211,10 +215,55 @@ export class GameStateManager {
       return;
     }
 
+    // Store the spin result before ending the spin
+    if (this.currentSpinIndex !== null) {
+      this.storeSpinResult(this.currentSpinIndex);
+    }
+
     this.isSpinning = false;
     this.currentSpinIndex = null;
     console.log('🏁 Spin completed, entering idle state');
     console.log('⏸️ Game will remain idle until new spins are queued');
+  }
+
+  /**
+   * Store spin result to database
+   */
+  private async storeSpinResult(spinNumber: number): Promise<void> {
+    try {
+      // Calculate roulette properties for the winning number
+      const color = getRouletteColor(spinNumber);
+      const parity = getRouletteParity(spinNumber);
+      
+      console.log(`💾 Storing spin result: ${spinNumber} ${color} ${parity}`);
+      
+      const success = await this.supabaseService.storeSpinResult(spinNumber, color, parity);
+      
+      if (success) {
+        console.log(`✅ Spin result stored successfully: ${spinNumber} ${color} ${parity}`);
+      } else {
+        console.warn(`⚠️ Failed to store spin result: ${spinNumber}`);
+      }
+    } catch (error) {
+      Logger.error(`❌ Error storing spin result: ${error}`);
+    }
+  }
+
+
+
+  /**
+   * Get last spin results from database
+   */
+  public async getLastSpinResults(limit: number = 5, includeDeleted: boolean = false): Promise<any[]> {
+    try {
+      const results = await this.supabaseService.getLastSpinResults(limit, includeDeleted);
+      const resultText = includeDeleted ? 'spin results (including deleted)' : 'active spin results';
+      console.log(`📊 Retrieved ${results.length} ${resultText} for API`);
+      return results;
+    } catch (error) {
+      Logger.error(`❌ Error retrieving spin results: ${error}`);
+      return [];
+    }
   }
 
   /**
@@ -268,7 +317,7 @@ export class GameStateManager {
    * Manually trigger a spin with specific index (for testing/admin)
    */
   public triggerManualSpin(spinIndex: number): boolean {
-    if (spinIndex < 0 || spinIndex > 36) {
+    if (!isValidRouletteNumber(spinIndex)) {
       console.log(`❌ Invalid spin index: ${spinIndex}. Must be 0-36`);
       return false;
     }
