@@ -50,8 +50,20 @@ export class TelegramBotService {
 
       const oldQueue = [...spinQueue];
       
+      // Check queue size limit to prevent memory issues
+      if (spinQueue.length >= CONFIG.MAX_SPIN_QUEUE_SIZE) {
+        this.bot.sendMessage(msg.chat.id, `❌ **Queue Full**\n\n📋 Current Queue: ${spinQueue.length}/${CONFIG.MAX_SPIN_QUEUE_SIZE}\n👤 User: @${username}\n\nThe spin queue is full. Please wait for current spins to be processed.`);
+        await this.logAction(userId, username, 'add_spin_queue_full', `Queue full: ${spinQueue.length}/${CONFIG.MAX_SPIN_QUEUE_SIZE}`, null, null, false);
+        return;
+      }
+
       // Store spin in database immediately when command is received
       const spinId = await this.storeSpinResult(index);
+      
+      // Refresh last spin cache since we added a new spin
+      if (spinId) {
+        await this.gameStateManager.refreshLastSpinCache();
+      }
       
       spinQueue.push(index);
       const gameState = this.gameStateManager.getGameStateResponse();

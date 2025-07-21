@@ -43,10 +43,29 @@ export class GameStateManager {
   private lastFrontendActivity: Date | null = null;
   private activityCheckTimer: NodeJS.Timeout | null = null;
 
+  // Cached last spin result (to avoid repeated DB calls)
+  private cachedLastSpinResult: any = null;
+  private lastSpinCacheTime: Date | null = null;
+  private readonly CACHE_DURATION = 300000; // 5 minutes cache
+
   private constructor() {
     console.log('🎮 GameStateManager initialized with API-driven state tracking');
     this.supabaseService = SupabaseService.getInstance();
     this.startActivityMonitoring();
+    // Load initial last spin result cache
+    this.loadInitialLastSpinCache();
+  }
+
+  /**
+   * Load initial last spin result cache on startup
+   */
+  private async loadInitialLastSpinCache(): Promise<void> {
+    try {
+      await this.getLastSpinResult(true); // Force refresh on startup
+      console.log('📦 Initial last spin result cache loaded');
+    } catch (error) {
+      console.warn('⚠️ Failed to load initial last spin cache:', error);
+    }
   }
 
   public static getInstance(): GameStateManager {
@@ -126,8 +145,9 @@ export class GameStateManager {
     this.currentRoundStartTime = null;
     this.currentSpinIndex = null;
     this.lastFrontendActivity = null;
+    this.clearLastSpinCache(); // Clear cache on reset
     spinQueue.length = 0;
-    console.log('🔄 Game state reset - Queue cleared, frontend activity reset, game resumed');
+    console.log('🔄 Game state reset - Queue cleared, cache cleared, frontend activity reset, game resumed');
     this.resumeCallbacks.forEach(callback => callback());
   }
 
@@ -225,6 +245,10 @@ export class GameStateManager {
 
     this.isSpinning = false;
     this.currentSpinIndex = null;
+    
+    // Refresh last spin cache since we just completed a spin
+    await this.refreshLastSpinCache();
+    
     console.log('🏁 Spin completed, entering idle state');
     console.log('⏸️ Game will remain idle until new spins are queued');
   }
@@ -270,16 +294,51 @@ export class GameStateManager {
   }
 
   /**
-   * Get the last spin result from database
+   * Get the last spin result with intelligent caching
    */
-  public async getLastSpinResult(): Promise<any> {
+  public async getLastSpinResult(forceRefresh: boolean = false): Promise<any> {
+    // Check if we have valid cached data
+    if (!forceRefresh && this.cachedLastSpinResult && this.lastSpinCacheTime) {
+      const timeSinceCache = Date.now() - this.lastSpinCacheTime.getTime();
+      if (timeSinceCache < this.CACHE_DURATION) {
+        console.log('📦 Using cached last spin result');
+        return this.cachedLastSpinResult;
+      }
+    }
+
+    // Fetch fresh data from database
     try {
+      console.log('🔄 Fetching fresh last spin result from database');
       const results = await this.supabaseService.getLastSpinResults(1, false);
-      return results.length > 0 ? results[0] : null;
+      const lastSpinResult = results.length > 0 ? results[0] : null;
+      
+      // Update cache
+      this.cachedLastSpinResult = lastSpinResult;
+      this.lastSpinCacheTime = new Date();
+      
+      return lastSpinResult;
     } catch (error) {
       Logger.error(`❌ Error retrieving last spin result: ${error}`);
-      return null;
+      // Return cached data if available, even if stale
+      return this.cachedLastSpinResult;
     }
+  }
+
+  /**
+   * Refresh the last spin result cache (call after spin completion)
+   */
+  public async refreshLastSpinCache(): Promise<void> {
+    console.log('🔄 Refreshing last spin result cache');
+    await this.getLastSpinResult(true);
+  }
+
+  /**
+   * Clear the last spin result cache
+   */
+  public clearLastSpinCache(): void {
+    console.log('🗑️ Clearing last spin result cache');
+    this.cachedLastSpinResult = null;
+    this.lastSpinCacheTime = null;
   }
 
   /**
@@ -311,9 +370,10 @@ export class GameStateManager {
   public async getGameStateWithLastSpin(): Promise<GameStateResponse> {
     const gameState = this.getGameStateResponse();
     
-    // If no active game, include last spin result
+    // If no active game, include cached last spin result
     if (!gameState.roundActive && !gameState.isSpinning) {
-      const lastSpin = await this.getLastSpinResult();
+      // Use cached data first, fallback to fresh fetch if no cache
+      const lastSpin = this.cachedLastSpinResult || await this.getLastSpinResult();
       if (lastSpin) {
         gameState.lastSpinResult = {
           spin_number: lastSpin.spin_number,
@@ -531,5 +591,41 @@ ${roundInfo}
       this.activityCheckTimer = null;
       console.log('🔍 Stopped frontend activity monitoring');
     }
+  }
+
+  /**
+   * Cleanup all timers and resources (for graceful shutdown)
+   */
+  public cleanup(): void {
+    this.stopActivityMonitoring();
+    this.clearLastSpinCache();
+    
+    // Clear any pending timeouts (edge case handling)
+    if (this.activityCheckTimer) {
+      clearInterval(this.activityCheckTimer);
+      this.activityCheckTimer = null;
+    }
+    
+    Logger.info('🧹 GameStateManager cleanup completed');
+  }
+
+  /**
+   * Get system health status
+   */
+  public getHealthStatus(): any {
+    return {
+      state: this.currentState,
+      roundActive: this.roundActive,
+      isSpinning: this.isSpinning,
+      queueLength: spinQueue.length,
+      cacheStatus: {
+        hasCache: !!this.cachedLastSpinResult,
+        cacheAge: this.lastSpinCacheTime ? Date.now() - this.lastSpinCacheTime.getTime() : null
+      },
+      activityTracking: {
+        lastActivity: this.lastFrontendActivity,
+        timeSinceActivity: this.getTimeSinceLastActivity()
+      }
+    };
   }
 } 

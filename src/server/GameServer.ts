@@ -14,6 +14,11 @@ export class GameServer {
   private server = http.createServer(this.app);
   private gameStateManager: GameStateManager;
   private supabaseService: SupabaseService;
+  
+  // Simple rate limiting storage
+  private requestCounts = new Map<string, { count: number; resetTime: number }>();
+  private readonly RATE_LIMIT_WINDOW = 60000; // 1 minute
+  private readonly RATE_LIMIT_MAX = CONFIG.API_RATE_LIMIT; // requests per minute
 
   constructor() {
     this.gameStateManager = GameStateManager.getInstance();
@@ -24,20 +29,82 @@ export class GameServer {
   }
 
   private setupExpress() {
+    // Request logging middleware
+    this.app.use((req, res, next) => {
+      const startTime = Date.now();
+      
+      res.on('finish', () => {
+        const duration = Date.now() - startTime;
+        Logger.apiRequest(req.method, req.path, duration, res.statusCode);
+      });
+      
+      next();
+    });
+
+    // Simple rate limiting middleware
+    this.app.use((req, res, next) => {
+      const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+      const now = Date.now();
+      
+      // Clean up expired entries
+      for (const [ip, data] of this.requestCounts.entries()) {
+        if (now > data.resetTime) {
+          this.requestCounts.delete(ip);
+        }
+      }
+      
+      // Check current client
+      const clientData = this.requestCounts.get(clientIp);
+      if (!clientData || now > clientData.resetTime) {
+        // Reset window
+        this.requestCounts.set(clientIp, {
+          count: 1,
+          resetTime: now + this.RATE_LIMIT_WINDOW
+        });
+        next();
+      } else if (clientData.count < this.RATE_LIMIT_MAX) {
+        // Increment count
+        clientData.count++;
+        next();
+      } else {
+        // Rate limit exceeded
+        Logger.warn('Rate limit exceeded', { clientIp, count: clientData.count });
+        res.status(429).json({ 
+          error: 'Too many requests',
+          retryAfter: Math.ceil((clientData.resetTime - now) / 1000)
+        });
+      }
+    });
+
     // Enable CORS for all routes
     this.app.use(cors({
-      origin: '*',
+      origin: CONFIG.IS_PRODUCTION ? 
+        ['https://your-production-domain.com'] : // TODO: Replace with actual domain
+        '*',
       credentials: true,
       optionsSuccessStatus: 200
     }));
 
-    // Parse JSON bodies
-    this.app.use(express.json());
+    // Parse JSON bodies with size limit
+    this.app.use(express.json({ limit: '10mb' }));
 
     // Serve static files (if any)
     this.app.use(express.static(path.join(__dirname, '../../public')));
 
-    console.log('📦 Express server configured with CORS and static serving');
+    // Error handling middleware
+    this.app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+      Logger.error('Express error', { 
+        error: error.message,
+        path: req.path,
+        method: req.method
+      }, error);
+      
+      res.status(500).json({ 
+        error: CONFIG.IS_PRODUCTION ? 'Internal server error' : error.message 
+      });
+    });
+
+    Logger.info('📦 Express server configured with security middleware');
   }
 
   /**
@@ -54,16 +121,31 @@ export class GameServer {
    * 🎯 POST /api/trigger-round-end - Manually trigger round end
    */
   private setupAPIRoutes() {
-    // Health check endpoint
+    // Enhanced health check endpoint
     this.app.get('/health', (req, res) => {
-      const gameState = this.gameStateManager.getGameStateResponse();
-      res.json({ 
-        status: 'ok', 
-        timestamp: TimeUtils.getIndianISOForDB(),
-        gameState: this.gameStateManager.getState(),
-        queuedSpins: spinQueue.length,
-        ...gameState
-      });
+      try {
+        const gameState = this.gameStateManager.getGameStateResponse();
+        const healthStatus = this.gameStateManager.getHealthStatus();
+        
+        res.json({ 
+          status: 'ok', 
+          timestamp: TimeUtils.getIndianISOForDB(),
+          uptime: process.uptime(),
+          memory: process.memoryUsage(),
+          environment: CONFIG.NODE_ENV,
+          gameState: this.gameStateManager.getState(),
+          queuedSpins: spinQueue.length,
+          health: healthStatus,
+          ...gameState
+        });
+      } catch (error) {
+        Logger.error('Health check failed', { error: error instanceof Error ? error.message : error }, error as Error);
+        res.status(500).json({ 
+          status: 'error',
+          timestamp: TimeUtils.getIndianISOForDB(),
+          error: 'Health check failed'
+        });
+      }
     });
 
     // Legacy status endpoint (keep for backward compatibility)
@@ -96,6 +178,20 @@ export class GameServer {
       console.log(`📡 API: Game state requested - Round: ${gameState.roundActive}, Spinning: ${gameState.isSpinning}${gameState.lastSpinResult ? `, Last: ${gameState.lastSpinResult.spin_number}` : ''}`);
       
       res.json(gameState);
+    });
+
+    /**
+     * POST /api/refresh-cache - Manually refresh last spin cache
+     */
+    this.app.post('/api/refresh-cache', async (req, res) => {
+      try {
+        await this.gameStateManager.refreshLastSpinCache();
+        console.log('🔄 API: Last spin cache manually refreshed');
+        res.json({ success: true, message: 'Cache refreshed successfully' });
+      } catch (error) {
+        console.error('❌ API: Error refreshing cache:', error);
+        res.status(500).json({ success: false, error: 'Failed to refresh cache' });
+      }
     });
 
     /**
@@ -293,21 +389,63 @@ export class GameServer {
      * Allows manual triggering of specific spin index
      */
     this.app.post('/api/trigger-spin', async (req, res) => {
-      const { spinIndex } = req.body;
-      
-      if (typeof spinIndex !== 'number') {
-        res.status(400).json({ error: 'spinIndex must be a number' });
-        return;
-      }
-      
-      const success = await this.gameStateManager.triggerManualSpin(spinIndex);
-      
-      if (success) {
-        console.log(`🎮 API: Manual spin triggered - Index: ${spinIndex}`);
-        res.json({ success: true, message: `Spin ${spinIndex} triggered successfully` });
-      } else {
-        console.log(`❌ API: Failed to trigger spin - Index: ${spinIndex}`);
-        res.status(400).json({ error: 'Failed to trigger spin. Check if index is valid (0-36) and no spin is already active.' });
+      try {
+        const { spinIndex } = req.body;
+        
+        // Input validation
+        if (spinIndex === undefined || spinIndex === null) {
+          res.status(400).json({ 
+            error: 'Missing required field: spinIndex',
+            expected: 'number between 0-36'
+          });
+          return;
+        }
+        
+        if (typeof spinIndex !== 'number') {
+          res.status(400).json({ 
+            error: 'spinIndex must be a number',
+            received: typeof spinIndex,
+            expected: 'number between 0-36'
+          });
+          return;
+        }
+        
+        if (!Number.isInteger(spinIndex) || spinIndex < 0 || spinIndex > 36) {
+          res.status(400).json({ 
+            error: 'spinIndex must be an integer between 0-36',
+            received: spinIndex
+          });
+          return;
+        }
+        
+        // Check queue size
+        if (spinQueue.length >= CONFIG.MAX_SPIN_QUEUE_SIZE) {
+          res.status(429).json({ 
+            error: 'Spin queue is full',
+            queueSize: spinQueue.length,
+            maxSize: CONFIG.MAX_SPIN_QUEUE_SIZE
+          });
+          return;
+        }
+        
+        const success = await this.gameStateManager.triggerManualSpin(spinIndex);
+        
+        if (success) {
+          Logger.gameEvent('manual_spin_triggered', { spinIndex, source: 'api' });
+          res.json({ success: true, message: `Spin ${spinIndex} triggered successfully` });
+        } else {
+          res.status(400).json({ 
+            error: 'Failed to trigger spin',
+            reason: 'Game may be in invalid state or spin already active',
+            spinIndex
+          });
+        }
+      } catch (error) {
+        Logger.error('API trigger-spin error', { error: error instanceof Error ? error.message : error }, error as Error);
+        res.status(500).json({ 
+          error: 'Internal server error',
+          message: CONFIG.IS_PRODUCTION ? 'Something went wrong' : (error as Error).message
+        });
       }
     });
 
