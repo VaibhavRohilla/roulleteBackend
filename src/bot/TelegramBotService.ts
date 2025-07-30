@@ -15,6 +15,7 @@ export class TelegramBotService {
   public bot: TelegramBot;
   private auditService: SupabaseService;
   private gameStateManager: GameStateManager;
+  private isDestroyed: boolean = false; // CRITICAL FIX: Prevent operations after destruction
 
   constructor() {
     this.bot = new TelegramBot(CONFIG.TELEGRAM_BOT_TOKEN, { polling: true });
@@ -437,6 +438,11 @@ export class TelegramBotService {
     newValue: any,
     success: boolean
   ): Promise<void> {
+    // CRITICAL FIX: Don't log if service is destroyed
+    if (this.isDestroyed) {
+      return;
+    }
+
     await this.auditService.logAction({
       user_id: userId,
       username,
@@ -446,5 +452,32 @@ export class TelegramBotService {
       new_value: newValue,
       success
     });
+  }
+
+  /**
+   * CRITICAL FIX: Cleanup method to prevent memory leaks
+   */
+  public destroy(): void {
+    console.log('🗑️ Starting TelegramBotService destruction...');
+    
+    this.isDestroyed = true;
+    
+    try {
+      // Stop polling and close bot connection
+      if (this.bot) {
+        this.bot.stopPolling();
+        // Note: Telegram bot doesn't have a direct destroy method
+        // but stopping polling prevents new handlers from executing
+      }
+      
+      // Clear queues to prevent memory leaks
+      spinQueue.length = 0;
+      spinIdMap.clear();
+      
+      console.log('🗑️ TelegramBotService destroyed - Polling stopped, queues cleared');
+      
+    } catch (error) {
+      console.error('❌ Error during TelegramBotService destruction:', error);
+    }
   }
 }

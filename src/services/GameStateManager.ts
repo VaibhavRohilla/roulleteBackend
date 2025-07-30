@@ -31,13 +31,18 @@ export class GameStateManager {
   private pauseCallbacks: Array<() => void> = [];
   private resumeCallbacks: Array<() => void> = [];
   private supabaseService: SupabaseService;
-  
+
   // API-driven game state tracking
   private roundActive: boolean = false;
   private isSpinning: boolean = false;
   private currentRoundStartTime: Date | null = null;
   private currentSpinIndex: number | null = null;
   private roundDuration: number = CONFIG.ROUND_DURATION;
+
+  // CRITICAL FIX: Timer management to prevent race conditions
+  private activeRoundTimer: NodeJS.Timeout | null = null;
+  private activeSpinTimer: NodeJS.Timeout | null = null;
+  private operationLock: boolean = false; // Prevent concurrent operations
 
   // Frontend activity tracking
   private lastFrontendActivity: Date | null = null;
@@ -136,18 +141,29 @@ export class GameStateManager {
   }
 
   /**
-   * Reset game state and clear queue
+   * Reset game state and clear queue - MEMORY LEAK FIXED
    */
   public reset(): void {
+    // CRITICAL FIX: Clear all timers to prevent memory leaks
+    this.clearRoundTimer();
+    this.clearSpinTimer();
+    this.stopActivityMonitoring();
+
     this.currentState = GameState.RUNNING;
     this.roundActive = false;
     this.isSpinning = false;
     this.currentRoundStartTime = null;
     this.currentSpinIndex = null;
     this.lastFrontendActivity = null;
+    this.operationLock = false; // Reset operation lock
     this.clearLastSpinCache(); // Clear cache on reset
     spinQueue.length = 0;
-    console.log('🔄 Game state reset - Queue cleared, cache cleared, frontend activity reset, game resumed');
+    
+    console.log('🔄 Game state reset - All timers cleared, queue cleared, cache cleared, frontend activity reset, game resumed');
+    
+    // Restart activity monitoring
+    this.startActivityMonitoring();
+    
     this.resumeCallbacks.forEach(callback => callback());
   }
 
@@ -156,9 +172,15 @@ export class GameStateManager {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   /**
-   * Start a new round with countdown timer
+   * Start a new round with countdown timer - RACE CONDITION FIXED
    */
   public startNewRound(): boolean {
+    // CRITICAL FIX: Add operation lock to prevent concurrent execution
+    if (this.operationLock) {
+      console.log('🔒 Operation in progress, cannot start new round');
+      return false;
+    }
+
     if (!this.isRunning()) {
       console.log('⏸️ Cannot start round - game is not running');
       return false;
@@ -169,88 +191,185 @@ export class GameStateManager {
       return false;
     }
 
-    this.roundActive = true;
-    this.isSpinning = false;
-    this.currentRoundStartTime = new Date();
-    this.currentSpinIndex = null;
-    
-    console.log(`🕒 New round started - Duration: ${this.roundDuration}ms`);
-    
-    // Auto-end round after duration
-    setTimeout(async () => {
-      await this.endRound();
-    }, this.roundDuration);
+    this.operationLock = true;
 
-    return true;
+    try {
+      // CRITICAL FIX: Clear any existing round timer before starting new one
+      this.clearRoundTimer();
+
+      this.roundActive = true;
+      this.isSpinning = false;
+      this.currentRoundStartTime = new Date();
+      this.currentSpinIndex = null;
+      
+      console.log(`🕒 New round started - Duration: ${this.roundDuration}ms (Timer: ${this.activeRoundTimer ? 'EXISTING CLEARED' : 'NEW'})`);
+      
+      // CRITICAL FIX: Store timer ID for proper cleanup
+      this.activeRoundTimer = setTimeout(async () => {
+        console.log('⏰ Round timer expired - ending round');
+        await this.endRound();
+      }, this.roundDuration);
+
+      this.operationLock = false;
+      return true;
+    } catch (error) {
+      this.operationLock = false;
+      console.error('❌ Error starting new round:', error);
+      return false;
+    }
   }
 
   /**
-   * End the current round and trigger spin
+   * CRITICAL FIX: Clear round timer safely
+   */
+  private clearRoundTimer(): void {
+    if (this.activeRoundTimer) {
+      clearTimeout(this.activeRoundTimer);
+      this.activeRoundTimer = null;
+      console.log('🧹 Previous round timer cleared');
+    }
+  }
+
+  /**
+   * CRITICAL FIX: Clear spin timer safely
+   */
+  private clearSpinTimer(): void {
+    if (this.activeSpinTimer) {
+      clearTimeout(this.activeSpinTimer);
+      this.activeSpinTimer = null;
+      console.log('🧹 Previous spin timer cleared');
+    }
+  }
+
+  /**
+   * End the current round and trigger spin - RACE CONDITION FIXED
    */
   public async endRound(): Promise<void> {
+    // CRITICAL FIX: Add operation lock to prevent concurrent execution
+    if (this.operationLock) {
+      console.log('🔒 Operation in progress, cannot end round');
+      return;
+    }
+
     if (!this.roundActive) {
       console.log('❌ Cannot end round - no active round');
       return;
     }
 
-    // Process spin only if there are queued spins
-    const spins = [...spinQueue];
-    spinQueue.length = 0;
+    this.operationLock = true;
 
-    if (spins.length === 0) {
-      // No spins queued - just end the round without spinning
-      console.log('💤 No queued spins. Round ended without spin - entering idle state.');
-      this.roundActive = false;
-      this.isSpinning = false;
-      this.currentSpinIndex = null;
-      
-      // Stay idle - new rounds will only start when spins are queued via Telegram
-      console.log('⏸️ Game idle - waiting for spins to be queued via Telegram bot');
-      
-      return;
+    try {
+      // CRITICAL FIX: Clear round timer as round is ending
+      this.clearRoundTimer();
+
+      // CRITICAL FIX: Atomic queue operation with rollback capability
+      const spins = [...spinQueue];
+      const originalQueueLength = spinQueue.length;
+
+      if (spins.length === 0) {
+        // No spins queued - just end the round without spinning
+        console.log('💤 No queued spins. Round ended without spin - entering idle state.');
+        this.roundActive = false;
+        this.isSpinning = false;
+        this.currentSpinIndex = null;
+        this.operationLock = false;
+        
+        // Stay idle - new rounds will only start when spins are queued via Telegram
+        console.log('⏸️ Game idle - waiting for spins to be queued via Telegram bot');
+        return;
+      }
+
+      // Clear queue atomically (can rollback if needed)
+      spinQueue.length = 0;
+
+      try {
+        // Use first queued spin
+        this.currentSpinIndex = spins[0];
+        console.log(`🌀 Using queued spin: ${this.currentSpinIndex} (already stored in DB by Telegram)`);
+        
+        // Log spin processing to audit trail  
+        await this.logSpinProcessing(spins[0], spins, spins.length - 1);
+        
+        // Put remaining spins back in queue
+        if (spins.length > 1) {
+          spinQueue.unshift(...spins.slice(1));
+          console.log(`📋 ${spins.length - 1} spins returned to queue`);
+        }
+
+        // CRITICAL FIX: Clear any existing spin timer before setting new one
+        this.clearSpinTimer();
+
+        this.isSpinning = true;
+        this.roundActive = false; // Round ends when spin starts
+        console.log(`🎰 Round ended, spin started with index: ${this.currentSpinIndex}`);
+        
+        // CRITICAL FIX: Store spin timer ID for proper cleanup
+        const spinDuration = CONFIG.FRONTEND_SPIN_DURATION + CONFIG.SPIN_BUFFER_TIME;
+        this.activeSpinTimer = setTimeout(async () => {
+          console.log('⏰ Spin timer expired - ending spin');
+          await this.endSpin();
+        }, spinDuration);
+
+        this.operationLock = false;
+
+      } catch (error) {
+        // CRITICAL FIX: Rollback queue state on error
+        console.error('❌ Error processing spin, rolling back queue:', error);
+        spinQueue.length = 0;
+        spinQueue.push(...spins);
+        console.log(`🔄 Queue rolled back to ${originalQueueLength} items`);
+        
+        this.roundActive = false;
+        this.isSpinning = false;
+        this.currentSpinIndex = null;
+        this.operationLock = false;
+        throw error;
+      }
+
+    } catch (error) {
+      this.operationLock = false;
+      console.error('❌ Error in endRound:', error);
+      throw error;
     }
-
-    // Use first queued spin
-    this.currentSpinIndex = spins[0];
-    console.log(`🌀 Using queued spin: ${this.currentSpinIndex} (already stored in DB by Telegram)`);
-    
-    // Log spin processing to audit trail  
-    await this.logSpinProcessing(spins[0], spins, spins.length - 1);
-    
-    // Put remaining spins back in queue
-    if (spins.length > 1) {
-      spinQueue.unshift(...spins.slice(1));
-      console.log(`📋 ${spins.length - 1} spins returned to queue`);
-    }
-
-    this.isSpinning = true;
-    this.roundActive = false; // Round ends when spin starts
-    console.log(`🎰 Round ended, spin started with index: ${this.currentSpinIndex}`);
-    
-    // Auto-end spin after frontend animation duration
-    const spinDuration = CONFIG.FRONTEND_SPIN_DURATION + CONFIG.SPIN_BUFFER_TIME;
-    setTimeout(async () => {
-      await this.endSpin();
-    }, spinDuration);
   }
 
   /**
-   * End the current spin and enter idle state
+   * End the current spin and enter idle state - RACE CONDITION FIXED
    */
   public async endSpin(): Promise<void> {
+    // CRITICAL FIX: Add operation lock to prevent concurrent execution
+    if (this.operationLock) {
+      console.log('🔒 Operation in progress, cannot end spin');
+      return;
+    }
+
     if (!this.isSpinning) {
       console.log('❌ Cannot end spin - no active spin');
       return;
     }
 
-    this.isSpinning = false;
-    this.currentSpinIndex = null;
-    
-    // Refresh last spin cache since we just completed a spin
-    await this.refreshLastSpinCache();
-    
-    console.log('🏁 Spin completed, entering idle state');
-    console.log('⏸️ Game will remain idle until new spins are queued');
+    this.operationLock = true;
+
+    try {
+      // CRITICAL FIX: Clear spin timer as spin is ending
+      this.clearSpinTimer();
+
+      this.isSpinning = false;
+      this.currentSpinIndex = null;
+      
+      // Refresh last spin cache since we just completed a spin
+      await this.refreshLastSpinCache();
+      
+      console.log('🏁 Spin completed, entering idle state');
+      console.log('⏸️ Game will remain idle until new spins are queued');
+
+      this.operationLock = false;
+
+    } catch (error) {
+      this.operationLock = false;
+      console.error('❌ Error in endSpin:', error);
+      throw error;
+    }
   }
 
 
@@ -358,7 +477,7 @@ export class GameStateManager {
     return {
       roundActive: this.roundActive,
       isSpinning: this.isSpinning,
-      spinIndex: this.currentSpinIndex || undefined,
+      spinIndex: this.currentSpinIndex !== null ? this.currentSpinIndex : undefined,
       roundStartTime: this.currentRoundStartTime ? TimeUtils.toIndianISO(this.currentRoundStartTime) : undefined,
       roundDuration: this.roundDuration
     };
@@ -594,9 +713,14 @@ ${roundInfo}
   }
 
   /**
-   * Cleanup all timers and resources (for graceful shutdown)
+   * Cleanup all timers and resources (for graceful shutdown) - MEMORY LEAK FIXED
    */
   public cleanup(): void {
+    console.log('🧹 Starting GameStateManager cleanup...');
+    
+    // CRITICAL FIX: Clear all game timers
+    this.clearRoundTimer();
+    this.clearSpinTimer();
     this.stopActivityMonitoring();
     this.clearLastSpinCache();
     
@@ -605,8 +729,15 @@ ${roundInfo}
       clearInterval(this.activityCheckTimer);
       this.activityCheckTimer = null;
     }
+
+    // Reset state to prevent further operations
+    this.operationLock = false;
+    this.roundActive = false;
+    this.isSpinning = false;
+    this.currentRoundStartTime = null;
+    this.currentSpinIndex = null;
     
-    Logger.info('🧹 GameStateManager cleanup completed');
+    Logger.info('🧹 GameStateManager cleanup completed - All timers cleared');
   }
 
   /**
