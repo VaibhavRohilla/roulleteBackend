@@ -361,9 +361,16 @@ export class GameStateManager {
       await this.refreshLastSpinCache();
       
       console.log('🏁 Spin completed, entering idle state');
-      console.log('⏸️ Game will remain idle until new spins are queued');
-
-      this.operationLock = false;
+      
+      // CRITICAL FIX: Check if there are queued spins and start a new round
+      if (spinQueue.length > 0 && this.isRunning()) {
+        console.log(`🔄 Found ${spinQueue.length} queued spins, starting new round automatically`);
+        this.operationLock = false; // Release lock before starting new round
+        this.startNewRound();
+      } else {
+        console.log('⏸️ No queued spins - game will remain idle');
+        this.operationLock = false;
+      }
 
     } catch (error) {
       this.operationLock = false;
